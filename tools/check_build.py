@@ -6,6 +6,9 @@ import sys
 
 
 def check(build: Path, target: str) -> None:
+    version = (Path(__file__).resolve().parents[1]/'version.txt').read_text().strip()
+    description = json.loads((build/'project_description.json').read_text())
+    assert description['project_version'] == version, description['project_version']
     config = json.loads((build/'config/sdkconfig.json').read_text())
     flash = json.loads((build/'flasher_args.json').read_text())
     expected = (3, 4, 5) if target == 'esp32c3' else (4, 5, 6)

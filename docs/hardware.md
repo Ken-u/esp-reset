@@ -61,4 +61,4 @@ Nexperia 2N7002 / SOT-23：从顶部看，单脚朝上，上方是 **3=D**，下
 
 每个按键都需要独立电子开关。图中三路 RESET 的目标触点分别换成上述按键触点。RECOVERY 可能是 ADC 电阻按键，必须跨接原按键两端；未知触点优先双向 PhotoMOS。MASKROM 仅接板上专用按键或已有安全接口，不能按普通接地按键方式处理 eMMC CLK。
 
-`loader.sh` / `maskrom.sh` 先按住对应启动键 100ms，再按 RESET 200ms，松开 RESET 后保持启动键默认1500ms，最后释放。板型可能要求不同时间或上电时序，脚本只确认电子开关时序完成。
+`./espreset loader` / `./espreset maskrom` 先按住对应启动键 100ms，再按 RESET 200ms，松开 RESET 后保持启动键默认1500ms，最后释放。板型可能要求不同时间或上电时序，脚本只确认电子开关时序完成。
