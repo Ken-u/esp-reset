@@ -37,11 +37,11 @@ class ToolTests(unittest.TestCase):
                       'flash_settings': {'flash_mode': 'dio', 'flash_freq': '40m', 'flash_size': '16MB'}}
             (build/'flasher_args.json').write_text(json.dumps(config))
             packager.package(build, output)
-            command = flasher.flash_command(output, '/dev/test', 460800)
+            command = flasher.flash_command(output/'firmware', '/dev/test', 460800)
             self.assertIn('esp32s3', command)
             self.assertIn('16MB', command)
             for offset, name in files.items():
-                self.assertEqual(command[command.index(offset)+1], str((output/name).resolve()))
+                self.assertEqual(command[command.index(offset)+1], str((output/'firmware'/name).resolve()))
             for line in (output/'SHA256SUMS').read_text().splitlines():
                 digest, name = line.split('  ', 1)
                 self.assertEqual(digest, hashlib.sha256((output/name).read_bytes()).hexdigest())

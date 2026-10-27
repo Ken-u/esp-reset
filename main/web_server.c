@@ -46,7 +46,7 @@ static bool authorize(httpd_req_t *req)
 {
     char token[25];
     size_t length = httpd_req_get_hdr_value_len(req, "X-Reset-Token");
-    if (length == 24 && httpd_req_get_hdr_value_str(req, "X-Reset-Token", token, sizeof token) == ESP_OK &&
+    if (length == strlen("esp32reset") && httpd_req_get_hdr_value_str(req, "X-Reset-Token", token, sizeof token) == ESP_OK &&
         settings_authorize(token)) return true;
     error_reply(req, "401 Unauthorized", "Management password required (X-Reset-Token)");
     return false;

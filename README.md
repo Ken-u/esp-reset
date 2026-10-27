@@ -13,8 +13,8 @@ GPIO 是芯片编号，以板上丝印为准。**C3 已按此板的限制禁用 
 
 ## 功能
 
-- 首次启动的 WPA2 配网热点；手机/电脑浏览器配网，无需安装 App。
-- Wi-Fi 凭据和独立随机管理密码持久化；联网稳定 30 秒后关闭热点，失联约 60 秒恢复热点。
+- USB 配网，固定管理密码 `esp32reset`，不启动 AP；Wi-Fi 凭据保存在 NVS。
+- macOS / Linux 一键脚本使用 uv 准备 Python，无需 ESP-IDF 或编译环境。
 - 设备网页：网络/固件/复位状态、目标板复位、Wi-Fi 设置、应用 OTA、控制器重启。
 - 一块板支持三路独立复位；每路约 200 ms 高电平脉冲、松开后独立冷却 3 秒，并分别统计次数。没有全路复位或自动反复复位功能。
 - 管理密码鉴权；API 和 CLI；同一启动内每路最近 8 个成功 request_id 独立去重。
@@ -35,39 +35,54 @@ GPIO 是芯片编号，以板上丝印为准。**C3 已按此板的限制禁用 
 - `esp-reset-esp32s3-n16r8`
 - `esp-reset-esp32c3-supermini`
 
-解压后安装 esptool，并刷入所有分区文件：
+解压后接 **原生 USB / OTG** 口，关闭其他串口程序，执行：
 
 ```bash
-python3 -m pip install esptool pyserial
-python3 flash.py --port /dev/ttyACM0
-# macOS 替换成 /dev/cu.usbmodem... 或 USB 转串口实际设备路径
+sh setup.sh
+# 多设备时显式指定，例如 macOS：
+sh setup.sh --port /dev/cu.usbmodem5A450470201
 ```
 
-`flash.py` 自动读取包内 `flasher_args.json`，使用匹配芯片、Flash 大小和地址，不需要手工猜烧录偏移。Windows 使用 `python flash.py --port COM5`。如果无法自动进下载模式，按住 BOOT、按一下板子的 RESET/EN、松开 BOOT 后再刷。NVS 不会被普通刷写或 OTA 清除。
+脚本自动准备 uv、Python 3.12、esptool 5.6.0、pyserial 3.5，读取固件自带地址刷写，隐藏输入 Wi-Fi 密码，等待联网并打印后台网页地址，最后进入自动重连串口监视。默认 115200 刷写，支持 `--baud 460800` 和 `--no-stub`。第一次下载工具和依赖需要互联网。
 
-## 首次配网
+**后台密码固定 `esp32reset`**，终端也会直接显示。旧随机管理密码升级后失效，Wi-Fi 配置保留。原生 USB 在 ESP 自身 RESET 时断开是重新枚举，脚本会按 USB 序列号/物理位置等待同一设备，并重新查询密码和网页地址；最早的 ROM 日志可能仍早于重连，查询状态不依赖启动日志。USB-UART 桥接口不支持本版 USB 配网协议，两个板型均使用原生 USB。
 
-1. 刷机后用 USB 串口监视器打开 115200 波特率，按一下 ESP 板的 RESET/EN，找到启动日志：
+如需手动下载：按住 BOOT，点 RESET/EN，松开 BOOT 后刷写。刷完若仍在 ROM 下载模式，点 EN（不按 BOOT）运行。Linux 若串口权限不足，需要系统管理员授予串口设备访问权限。
 
-   ```text
-   Management + recovery AP password: <24 位随机字符串>
-   Recovery AP: ESP-Reset-XXXXXX
-   ```
+下载包根目录只放 README、SHA256SUMS 和入口脚本；二进制在 `firmware/`，内部 Python 工具在 `tools/`。依赖位于 uv 缓存，缺少 uv 时安装到包内 `.tools/`，不修改 shell 配置。
 
-   也可运行 `python3 -m serial.tools.miniterm /dev/ttyACM0 115200`。S3 应用日志同时输出到 UART0 和原生 USB Serial/JTAG；板上若有 USB-UART 与 USB/OTG 两个口，两者均可查看。**C3 应用日志仅走原生 USB Serial/JTAG，避开 GPIO20/21 的 UART 功能。** 先打开对应监视器再按 RESET/EN。
+| 命令 | 用途 |
+| --- | --- |
+| `sh setup.sh` | 准备环境 → 刷写 → USB 配网 → 看串口 |
+| `sh flash.sh` | 仅刷写，打印密码及设备状态 |
+| `sh wifi.sh` | 单独 USB 配网，联网后打印网页地址 |
+| `sh monitor.sh` | 看串口，RESET 后自动重连 |
+| `sh status.sh` | 随时查询密码和网页地址 |
+| `sh reset.sh --channel 1` | 复位通道 1，支持 1/2/3，默认 1 |
+| `sh loader.sh` | RECOVERY + RESET 组合 |
+| `sh maskrom.sh` | MASKROM + RESET 组合 |
 
-2. 手机/电脑连接 `ESP-Reset-XXXXXX`，密码使用上述随机字符串；即使系统提示无互联网，也保持连接。
-3. 手动打开 **http://192.168.4.1/**（不依赖自动弹出配网页）。同一字符串也是管理密码。
-4. 输入家里/办公室的 **2.4 GHz** Wi-Fi 名称和密码，点击保存并连接。
-5. 页面显示联网后的设备 IP；后续直接打开该 IP。也可在路由器 DHCP 列表中找 `esp-reset-xxxxxx`。
+所有入口都支持 `--port`。`sh run.sh ports` 列举串口。AP 已关闭，未配网/联网失败时直接 USB 重新配网即可，不需要连接热点。
 
-首次没有可用串口监视器时不要猜默认密码；本项目不使用固定出厂密码。管理密码可随时从可信 USB 启动日志重新读取。Wi-Fi 密码不会经网页状态接口返回。
+### Loader / Maskrom 接线
+
+独立三路复位照旧使用 `reset.sh --channel N`。**只有将三路改接同一目标板的三个按键时，才使用 loader / maskrom**：
+
+| 通道 | S3 | C3 | 组合模式用途 |
+| --- | --- | --- | --- |
+| 1 | GPIO4 | GPIO3 | RESET |
+| 2 | GPIO5 | GPIO4 | RECOVERY / Loader 启动键 |
+| 3 | GPIO6 | GPIO5 | 专用 MASKROM 按键 |
+
+每路仍使用独立 MOSFET/PhotoMOS 开关，不能直接接未知信号。时序：启动键接通 100ms → RESET 接通 200ms → 松 RESET → 再保持启动键 1500ms → 松启动键。`--hold-ms` 可调最后保持时间（100..10000ms）。组合操作期间其他复位、OTA 和控制器重启互斥，结束后所有通道冷却 3 秒；释放失败的通道锁定直到 ESP 重启。同一启动内缓存最近 8 个成功组合请求，脚本不自动重试操作。
+
+脚本只确认 GPIO 时序已执行，不保证目标板进入特定模式。Loader 依赖目标板 bootloader 对 RECOVERY 的处理；Maskrom 需要目标板提供专用按键或安全控制接口。不要将 eMMC CLK 等信号直接接 ESP 或按通用按键图短接。执行后从目标串口或 `rkdeveloptool ld` 检查模式。
 
 ## 正常使用与恢复
 
 网页分别提供“复位第 1 / 2 / 3 路”按钮，显示各路 GPIO、状态和次数；确认后只对选中的一路执行 200 ms 左右脉冲。成功只表示外部开关已松开，不表示目标系统已经启动完成。
 
-控制器运行时长按 **BOOT 约 5 秒**，仅清除 Wi-Fi 并恢复热点，管理密码保持不变。上电就按住 BOOT 会进入 ROM 下载模式；这里指正常运行后再长按。
+控制器运行时长按 **BOOT 约 5 秒**，仅清除 Wi-Fi，之后通过 USB 重新配网，管理密码保持不变。上电就按住 BOOT 会进入 ROM 下载模式；这里指正常运行后再长按。
 
 网页“重启 ESP 控制器”重启的是控制器；目标板复位是另一个按钮。网页 OTA 上传对应芯片的 **`esp-reset.bin`**，不要上传 bootloader、分区表或其他项目的固件。OTA 校验芯片、映像和项目名称；校验失败不切换启动分区。新应用成功初始化网络及网页后才取消回滚。凭据存于 NVS，升级保留。
 
@@ -86,7 +101,7 @@ python3 tools/esp_reset.py --url http://192.168.1.50 wifi 'MyWiFi'
 python3 tools/esp_reset.py --url http://192.168.1.50 ota esp-reset.bin
 ```
 
-默认交互输入管理密码；自动化可通过 `ESP_RESET_TOKEN` 环境变量提供。CLI 不自动重试任何复位请求。超时可能发生在脉冲执行后，先观察目标板状态再决定是否再次操作。
+默认管理密码为 `esp32reset`；可通过 `ESP_RESET_TOKEN` 环境变量提供。CLI 不自动重试任何复位请求。超时可能发生在脉冲执行后，先观察目标板状态再决定是否再次操作。
 
 | 接口 | 方法 | 内容 |
 | --- | --- | --- |
@@ -99,7 +114,7 @@ python3 tools/esp_reset.py --url http://192.168.1.50 ota esp-reset.bin
 
 除 `/` 外均需请求头 `X-Reset-Token: <管理密码>`。JSON 请求需 `Content-Type: application/json`。复位冷却/维护中返回 409；松开后才返回 `{"ok":true,"state":"released"}`。`channel` **必须明确填写整数 1、2 或 3**，遗漏或非法值返回 400，绝不默认复位某一路。成功回执还包含实际 `channel` 和 `gpio`。request_id 是同次操作的幂等键，去重只覆盖该路本次启动中最近 8 个成功请求，不跨重启、不跨通道、不无限缓存。
 
-从单路 0.1 版升级后请刷新网页并更新 CLI/API 调用；升级保留 Wi-Fi 与管理密码。原有不带 channel 的请求会被拒绝。
+从单路 0.1 版升级后请刷新网页并更新 CLI/API 调用；升级保留 Wi-Fi，管理密码改为固定值。原有不带 channel 的请求会被拒绝。
 
 ## 从源码构建
 

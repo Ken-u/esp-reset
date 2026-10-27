@@ -136,3 +136,54 @@ void board_reset_end_maintenance(void)
         xSemaphoreGive(s_lock);
     }
 }
+
+/* Reserved together so HTTP pulses / OTA cannot interleave with a boot sequence. */
+esp_err_t board_reset_boot(int strap, const char *id, unsigned hold_ms)
+{
+    static char recent[8][BOARD_RESET_REQUEST_MAX + 1];
+    static int recent_strap[8];
+    static unsigned next;
+    if ((strap != 2 && strap != 3) || !id || !id[0] ||
+        strlen(id) > BOARD_RESET_REQUEST_MAX || hold_ms < 100 || hold_ms > 10000)
+        return ESP_ERR_INVALID_ARG;
+    if (!s_lock || xSemaphoreTake(s_lock, 0) != pdTRUE) return ESP_ERR_INVALID_STATE;
+    for (unsigned i = 0; i < 8; ++i) {
+        if (recent_strap[i] == strap && strcmp(recent[i], id) == 0) {
+            xSemaphoreGive(s_lock);
+            return ESP_OK;
+        }
+    }
+    bool busy = !s_enabled;
+    for (unsigned i = 0; i < BOARD_RESET_CHANNEL_COUNT; ++i)
+        busy |= s_channels[i].active || s_channels[i].fault ||
+                esp_timer_get_time() < s_channels[i].next_allowed_us;
+    if (busy) { xSemaphoreGive(s_lock); return ESP_ERR_INVALID_STATE; }
+    s_enabled = false;
+    s_channels[0].active = s_channels[strap - 1].active = true;
+    xSemaphoreGive(s_lock);
+    esp_err_t err = gpio_set_level(s_gpios[strap - 1], 1);
+    if (err == ESP_OK) {
+        vTaskDelay(pdMS_TO_TICKS(100));
+        err = gpio_set_level(s_gpios[0], 1);
+        if (err == ESP_OK) vTaskDelay(pdMS_TO_TICKS(BOARD_RESET_PULSE_MS));
+    }
+    esp_err_t reset_release = gpio_set_level(s_gpios[0], 0);
+    if (err == ESP_OK && reset_release == ESP_OK) vTaskDelay(pdMS_TO_TICKS(hold_ms));
+    esp_err_t strap_release = gpio_set_level(s_gpios[strap - 1], 0);
+    xSemaphoreTake(s_lock, portMAX_DELAY);
+    s_channels[0].active = s_channels[strap - 1].active = false;
+    s_channels[0].fault |= reset_release != ESP_OK;
+    s_channels[strap - 1].fault |= strap_release != ESP_OK;
+    if (reset_release != ESP_OK) err = reset_release;
+    if (strap_release != ESP_OK) err = strap_release;
+    for (unsigned i = 0; i < BOARD_RESET_CHANNEL_COUNT; ++i)
+        s_channels[i].next_allowed_us = esp_timer_get_time() + BOARD_RESET_COOLDOWN_MS * 1000LL;
+    if (err == ESP_OK) {
+        unsigned slot = next++ % 8;
+        strcpy(recent[slot], id); recent_strap[slot] = strap;
+        ++s_channels[0].count; ++s_channels[strap - 1].count;
+    }
+    s_enabled = true;
+    xSemaphoreGive(s_lock);
+    return err;
+}

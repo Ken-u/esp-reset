@@ -24,3 +24,6 @@ board_reset_status_t board_reset_status(int channel);
 /* Blocks new pulses during OTA/reboot; fails while a pulse is in progress. */
 esp_err_t board_reset_begin_maintenance(void);
 void board_reset_end_maintenance(void);
+
+/* Combination: channel 1 RESET plus channel 2 RECOVERY or 3 MASKROM. */
+esp_err_t board_reset_boot(int strap_channel, const char *request_id, unsigned hold_ms);

@@ -160,6 +160,58 @@ int main(void) {
     puts("Three channels: startup, isolation, concurrent pulse, cooldown, dedupe, maintenance and fault isolation passed");
 }
 '''
+BOOT_HARNESS = r'''
+#include <assert.h>
+#include <stdio.h>
+#include <string.h>
+#include "board_reset.h"
+#include "driver/gpio.h"
+#include "freertos/semphr.h"
+static int levels[49], events[64], n, fail_release, phase;
+static int64_t now;
+esp_err_t gpio_set_level(int pin,int level) {
+    if(n < 64) events[n++]=pin*2+level;
+    if(!level && pin==fail_release)return ESP_FAIL;
+    levels[pin]=level;return ESP_OK;
+}
+esp_err_t gpio_config(const gpio_config_t *c){(void)c;return ESP_OK;}
+int64_t esp_timer_get_time(void){return now;}
+void vTaskDelay(unsigned ticks){
+    assert(board_reset_begin_maintenance()==ESP_ERR_INVALID_STATE);
+    assert(board_reset_press(3,"interleaving")==ESP_ERR_INVALID_STATE);
+    assert(board_reset_boot(2,"overlap",1500)==ESP_ERR_INVALID_STATE);
+    int p1=board_reset_gpio(1),p2=board_reset_gpio(2),p3=board_reset_gpio(3);
+    int strap=levels[p2]?p2:p3;
+    assert(levels[strap]==1);
+    if(phase%3==0)assert(!levels[p1] && ticks==10);
+    if(phase%3==1)assert(levels[p1] && ticks==20);
+    if(phase%3==2)assert(!levels[p1] && ticks==150);
+    phase++;now+=ticks*10000;
+}
+int main(void){
+    assert(board_reset_init()==ESP_OK);n=0;
+    int p1=board_reset_gpio(1),p2=board_reset_gpio(2),p3=board_reset_gpio(3);
+    assert(board_reset_boot(1,"bad",1500)==ESP_ERR_INVALID_ARG && n==0);
+    assert(board_reset_boot(2,"bad",99)==ESP_ERR_INVALID_ARG && n==0);
+    assert(board_reset_boot(2,"loader",1500)==ESP_OK);
+    int loader[]={p2*2+1,p1*2+1,p1*2,p2*2};
+    assert(n==4 && memcmp(events,loader,sizeof loader)==0);
+    assert(!levels[p1] && !levels[p2] && !levels[p3]);
+    assert(board_reset_boot(2,"loader",1500)==ESP_OK && n==4);
+    assert(board_reset_boot(3,"rom",1500)==ESP_ERR_INVALID_STATE && n==4);
+    now+=3000000;n=0;
+    assert(board_reset_boot(3,"rom",1500)==ESP_OK);
+    int rom[]={p3*2+1,p1*2+1,p1*2,p3*2};
+    assert(n==4 && memcmp(events,rom,sizeof rom)==0);
+    assert(board_reset_status(1).count==2 && board_reset_status(2).count==1 && board_reset_status(3).count==1);
+    now+=3000000;fail_release=p3;n=0;
+    assert(board_reset_boot(3,"release-fail",1500)==ESP_FAIL);
+    assert(!board_reset_status(3).enabled && !board_reset_status(1).active);
+    fail_release=0;now+=3000000;
+    assert(board_reset_boot(2,"blocked-fault",1500)==ESP_ERR_INVALID_STATE);
+    puts("Boot sequence order, timing, exclusion, deduplication, cooldown and release fault passed");
+}
+'''
 SETTINGS_HARNESS = r'''
 #include <assert.h>
 #include <stdio.h>
@@ -196,7 +248,7 @@ void esp_fill_random(void *out,size_t n){memset(out,0x9a,n);}
 int main(void){
     assert(settings_init()==ESP_OK);
     reset_settings_t s=settings_get();
-    assert(!s.ssid[0] && strlen(s.token)==24 && settings_authorize(s.token));
+    assert(!s.ssid[0] && strcmp(s.token,"esp32reset")==0 && settings_authorize(s.token));
     assert(!settings_authorize(NULL) && !settings_authorize("wrong"));
     assert(!settings_authorize("000000000000000000000000"));
     assert(settings_set_wifi("wifi","short")==ESP_ERR_INVALID_ARG);
@@ -259,6 +311,11 @@ class NativeTests(unittest.TestCase):
                 with self.subTest(pin=pin, channel=index+1):
                     self.compile_and_run('board_reset.c', RESET_HARNESS,
                         self.reset_definitions('ESP32C3', pins) + ['-DEXPECT_INVALID_GPIO=1'])
+
+    def test_boot_sequences(self):
+        for target, pins in [('ESP32S3', (4, 5, 6)), ('ESP32C3', (3, 4, 5))]:
+            with self.subTest(target=target):
+                self.compile_and_run('board_reset.c', BOOT_HARNESS, self.reset_definitions(target, pins))
 
     def test_wifi_settings(self):
         self.compile_and_run('settings.c', SETTINGS_HARNESS)

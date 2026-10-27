@@ -45,18 +45,6 @@ static void on_event(void *arg, esp_event_base_t base, int32_t id, void *data)
     }
 }
 
-static void set_ap(bool enabled)
-{
-    reset_network_status_t status = network_status();
-    if (status.ap_enabled == enabled) return;
-    if (esp_wifi_set_mode(enabled ? WIFI_MODE_APSTA : WIFI_MODE_STA) == ESP_OK) {
-        portENTER_CRITICAL(&s_mux);
-        s_status.ap_enabled = enabled;
-        portEXIT_CRITICAL(&s_mux);
-        ESP_LOGI(TAG, "Recovery AP %s", enabled ? "enabled: http://192.168.4.1/" : "disabled");
-    }
-}
-
 static void apply_station_config(void)
 {
     reset_settings_t settings = settings_get();
@@ -71,8 +59,7 @@ static void apply_station_config(void)
 static void network_task(void *arg)
 {
     (void)arg;
-    int64_t disconnected_since = esp_timer_get_time();
-    int64_t connected_since = 0, last_attempt = -5000000LL, button_since = 0;
+    int64_t last_attempt = -5000000LL, button_since = 0;
     bool button_handled = false;
     while (true) {
         int64_t now = esp_timer_get_time(), due;
@@ -81,27 +68,15 @@ static void network_task(void *arg)
         if (due && now >= due) s_reconfigure_due = 0;
         portEXIT_CRITICAL(&s_mux);
         if (due && now >= due) {
-            set_ap(true);
             esp_wifi_disconnect();
             apply_station_config();
-            disconnected_since = now;
-            connected_since = 0;
             last_attempt = now - 5000000LL;
         }
         bool connected = (xEventGroupGetBits(s_events) & CONNECTED) != 0;
         reset_settings_t settings = settings_get();
-        if (connected) {
-            if (!connected_since) connected_since = now;
-            disconnected_since = 0;
-            if (now - connected_since >= 30000000LL) set_ap(false);
-        } else {
-            connected_since = 0;
-            if (!disconnected_since) disconnected_since = now;
-            if (!settings.ssid[0] || now - disconnected_since >= 60000000LL) set_ap(true);
-            if (settings.ssid[0] && now - last_attempt >= 5000000LL) {
-                esp_wifi_connect();
-                last_attempt = now;
-            }
+        if (!connected && settings.ssid[0] && now - last_attempt >= 5000000LL) {
+            esp_wifi_connect();
+            last_attempt = now;
         }
         if (gpio_get_level(CONFIG_RESET_RECOVERY_GPIO) == 0) {
             if (!button_since) button_since = now;
@@ -127,8 +102,7 @@ esp_err_t network_start(void)
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
     s_sta = esp_netif_create_default_wifi_sta();
-    esp_netif_t *ap = esp_netif_create_default_wifi_ap();
-    if (!s_sta || !ap) return ESP_ERR_NO_MEM;
+    if (!s_sta) return ESP_ERR_NO_MEM;
     uint8_t mac[6];
     ESP_ERROR_CHECK(esp_read_mac(mac, ESP_MAC_WIFI_STA));
     snprintf(s_status.ap_ssid, sizeof s_status.ap_ssid, "ESP-Reset-%02X%02X%02X", mac[3], mac[4], mac[5]);
@@ -139,16 +113,7 @@ esp_err_t network_start(void)
     ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
     ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, on_event, NULL));
     ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, on_event, NULL));
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_APSTA));
-    reset_settings_t settings = settings_get();
-    wifi_config_t ap_config = {0};
-    memcpy(ap_config.ap.ssid, s_status.ap_ssid, strlen(s_status.ap_ssid));
-    ap_config.ap.ssid_len = strlen(s_status.ap_ssid);
-    memcpy(ap_config.ap.password, settings.token, strlen(settings.token));
-    ap_config.ap.channel = 1;
-    ap_config.ap.max_connection = 3;
-    ap_config.ap.authmode = WIFI_AUTH_WPA2_PSK;
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &ap_config));
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
     apply_station_config();
     const gpio_config_t button = {
         .pin_bit_mask = 1ULL << CONFIG_RESET_RECOVERY_GPIO,
@@ -157,8 +122,8 @@ esp_err_t network_start(void)
     };
     ESP_ERROR_CHECK(gpio_config(&button));
     ESP_ERROR_CHECK(esp_wifi_start());
-    s_status.ap_enabled = true;
-    ESP_LOGI(TAG, "Recovery AP: %s ; open http://192.168.4.1/", s_status.ap_ssid);
+    s_status.ap_enabled = false;
+    ESP_LOGI(TAG, "USB provisioning ready; AP disabled");
     return xTaskCreate(network_task, "network", 4096, NULL, 4, NULL) == pdPASS ? ESP_OK : ESP_ERR_NO_MEM;
 }
 

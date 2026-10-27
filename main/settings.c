@@ -26,22 +26,9 @@ esp_err_t settings_init(void)
     }
     memcpy(s_settings.ssid, wifi.ssid, sizeof wifi.ssid);
     memcpy(s_settings.password, wifi.password, sizeof wifi.password);
-    size = sizeof s_settings.token;
-    err = nvs_get_str(nvs, "token", s_settings.token, &size);
-    if (err == ESP_ERR_NVS_NOT_FOUND) {
-        unsigned char bytes[12];
-        static const char hex[] = "0123456789abcdef";
-        esp_fill_random(bytes, sizeof bytes);
-        for (unsigned i = 0; i < sizeof bytes; ++i) {
-            s_settings.token[i * 2] = hex[bytes[i] >> 4];
-            s_settings.token[i * 2 + 1] = hex[bytes[i] & 15];
-        }
-        s_settings.token[24] = 0;
-        err = nvs_set_str(nvs, "token", s_settings.token);
-        if (err == ESP_OK) err = nvs_commit(nvs);
-    } else if (err == ESP_OK && strlen(s_settings.token) != 24) {
-        err = ESP_ERR_INVALID_SIZE;
-    }
+    /* Deliberately fixed by the owner; old random NVS tokens are ignored. */
+    strcpy(s_settings.token, "esp32reset");
+    err = ESP_OK;
 done:
     nvs_close(nvs);
     return err;
@@ -97,9 +84,9 @@ esp_err_t settings_clear_wifi(void) { return save_wifi("", ""); }
 
 bool settings_authorize(const char *token)
 {
-    if (!token || strlen(token) != 24) return false;
+    if (!token || strlen(token) != strlen("esp32reset")) return false;
     reset_settings_t current = settings_get();
     unsigned difference = 0;
-    for (unsigned i = 0; i < 24; ++i) difference |= (unsigned char)token[i] ^ (unsigned char)current.token[i];
+    for (unsigned i = 0; i < strlen("esp32reset"); ++i) difference |= (unsigned char)token[i] ^ (unsigned char)current.token[i];
     return difference == 0;
 }
