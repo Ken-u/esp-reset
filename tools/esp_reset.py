@@ -31,7 +31,7 @@ def request(base: str, token: str, path: str, payload=None, binary: bytes | None
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--url', required=True, help='e.g. http://192.168.4.1')
-    parser.add_argument('--token', default=os.environ.get('ESP_RESET_TOKEN', ''))
+    parser.add_argument('--token', default=os.environ.get('ESP_RESET_TOKEN', 'esp32reset'))
     commands = parser.add_subparsers(dest='command', required=True)
     commands.add_parser('status')
     reset = commands.add_parser('reset')

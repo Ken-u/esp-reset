@@ -11,6 +11,9 @@
 
 typedef struct {
     uint32_t count;
+    uint32_t pulse_count;
+    char last_request_id[BOARD_RESET_REQUEST_MAX + 1];
+    int64_t pressed_us, released_us;
     uint32_t cooldown_ms;
     bool enabled;
     bool active;
@@ -24,3 +27,6 @@ board_reset_status_t board_reset_status(int channel);
 /* Blocks new pulses during OTA/reboot; fails while a pulse is in progress. */
 esp_err_t board_reset_begin_maintenance(void);
 void board_reset_end_maintenance(void);
+
+/* Combination: channel 1 RESET plus channel 2 RECOVERY or 3 MASKROM. */
+esp_err_t board_reset_boot(int strap_channel, const char *request_id, unsigned hold_ms);

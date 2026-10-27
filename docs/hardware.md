@@ -48,3 +48,17 @@ Nexperia 2N7002 / SOT-23：从顶部看，单脚朝上，上方是 **3=D**，下
 - 建议 ESP 独立 USB 供电，避免目标板重置影响控制器供电。
 
 参考：[ESP32-S3-DevKitC-1 引脚说明](https://docs.espressif.com/projects/esp-dev-kits/en/latest/esp32s3/esp32-s3-devkitc-1/user_guide_v1.1.html)、[2N7002 数据手册](https://assets.nexperia.com/documents/data-sheet/2N7002.pdf)。
+
+## 同一目标板的 Loader / Maskrom 组合接线
+
+三路接不同目标板时仅用单路复位。要组合控制同一目标板，接线如下：
+
+| 通道 | S3 | C3 | 目标按键 |
+| --- | --- | --- | --- |
+| 1 | GPIO4 | GPIO3 | RESET |
+| 2 | GPIO5 | GPIO4 | RECOVERY（Loader） |
+| 3 | GPIO6 | GPIO5 | 专用 MASKROM |
+
+每个按键都需要独立电子开关。图中三路 RESET 的目标触点分别换成上述按键触点。RECOVERY 可能是 ADC 电阻按键，必须跨接原按键两端；未知触点优先双向 PhotoMOS。MASKROM 仅接板上专用按键或已有安全接口，不能按普通接地按键方式处理 eMMC CLK。
+
+`loader.sh` / `maskrom.sh` 先按住对应启动键 100ms，再按 RESET 200ms，松开 RESET 后保持启动键默认1500ms，最后释放。板型可能要求不同时间或上电时序，脚本只确认电子开关时序完成。

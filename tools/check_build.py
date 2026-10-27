@@ -14,8 +14,8 @@ def check(build: Path, target: str) -> None:
     assert actual == expected, (actual, expected)
     assert flash['extra_esptool_args']['chip'] == target
     assert flash['flash_settings']['flash_size'] == ('4MB' if target == 'esp32c3' else '16MB')
+    assert config.get('ESP_CONSOLE_USB_SERIAL_JTAG') is True
     if target == 'esp32c3':
-        assert config.get('ESP_CONSOLE_USB_SERIAL_JTAG') is True
         assert not config.get('ESP_CONSOLE_UART'), 'C3 application UART must stay off GPIO20/21'
     print(f'Verified {target}: channels {actual}, flash profile and console configuration')
 

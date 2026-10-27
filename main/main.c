@@ -1,8 +1,10 @@
 #include <stdio.h>
 #include "board_reset.h"
+#include "actions.h"
 #include "network.h"
 #include "settings.h"
 #include "web_server.h"
+#include "usb_console.h"
 #include "esp_log.h"
 #include "esp_ota_ops.h"
 #include "nvs_flash.h"
@@ -20,11 +22,13 @@ void app_main(void)
     ESP_ERROR_CHECK(settings_init());
     reset_settings_t settings = settings_get();
     printf("\nESP RESET / %s\nReset channels 1/2/3: GPIO%d / GPIO%d / GPIO%d (active high, external switches)\n"
-           "Management + recovery AP password: %s\n"
+           "Management password: %s\n"
            "Hold BOOT for 5 seconds while running to clear Wi-Fi.\n\n",
            CONFIG_IDF_TARGET, board_reset_gpio(1), board_reset_gpio(2), board_reset_gpio(3), settings.token);
     ESP_ERROR_CHECK(network_start());
+    ESP_ERROR_CHECK(actions_start());
     ESP_ERROR_CHECK(web_server_start());
+    ESP_ERROR_CHECK(usb_console_start());
     err = esp_ota_mark_app_valid_cancel_rollback();
     if (err != ESP_OK && err != ESP_ERR_OTA_ROLLBACK_INVALID_STATE) {
         ESP_LOGW("main", "OTA validation: %s", esp_err_to_name(err));

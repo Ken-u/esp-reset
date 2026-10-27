@@ -6,3 +6,9 @@ dependencies.lock
 __pycache__/
 *.pyc
 .DS_Store
+
+device.json
+last-action.json
+.tools/
+
+.control.lock
