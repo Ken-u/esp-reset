@@ -63,7 +63,7 @@ sh setup.sh --port /dev/cu.usbmodem5A450470201
 | `sh maskrom.sh --url http://ESP的IP` | HTTP MASKROM + RESET |
 | `sh result.sh` | 只查询上一次操作，不按键 |
 
-**日常控制通过 IP + HTTP，不需要把 ESP 接到电脑。** ESP 和目标板按接线图连接并共地（使用隔离开关时按模块要求）。USB 只用于刷机和可选的首次配网。网络命令接受 `--url` 或 `ESP_RESET_URL`；USB 配网成功后也会把地址保存在包目录 `device.json`，后续可省略地址。刷写/USB入口支持 `--port`；`sh run.sh ports` 列串口，`sh run.sh usb-status` 通过USB查状态。
+**控制脚本双模式：明确指定 `--ip` / `--url` 时通过网络，否则走原生 USB。** 网络模式不需要把 ESP 接到电脑。 ESP 和目标板按接线图连接并共地（使用隔离开关时按模块要求）。USB 只用于刷机和可选的首次配网。例如 `sh reset.sh --ip 192.168.3.6 --channel 3` 走网络；`sh reset.sh --channel 3` 走 USB，多个串口可加 `--port`。不指定IP时不会根据历史地址或环境变量自动切到网络。USB 配网会保存设备地址供查看。刷写/USB入口支持 `--port`；`sh run.sh ports` 列串口，`sh run.sh usb-status` 通过USB查状态。
 
 ### 网页组合与操作回执
 

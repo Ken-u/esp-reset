@@ -3,6 +3,8 @@ import http.server
 import importlib.util
 import io
 import json
+import os
+import subprocess
 from pathlib import Path
 import tempfile
 import threading
@@ -59,9 +61,24 @@ class NetworkTests(unittest.TestCase):
                 self.assertTrue(all(p['boot_id']=='new-boot' for p in posts))
                 self.assertEqual(wait.call_count,2)
 
-    def test_network_wrapper_does_not_require_serial_or_esptool(self):
-        source=(Path(__file__).resolve().parents[1]/'tools/run.sh').read_text()
-        branch=source.split('reset|loader|maskrom|status|result)')[1].split(';;')[0]
-        self.assertIn('network_script',branch)
-        self.assertNotIn('esptool',branch)
-        self.assertNotIn('pyserial',branch)
+    def test_wrapper_selects_http_only_when_ip_is_explicit(self):
+        launcher=Path(__file__).resolve().parents[1]/'tools/run.sh'
+        with tempfile.TemporaryDirectory() as directory:
+            uv=Path(directory)/'uv'
+            uv.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\n')
+            uv.chmod(0o755)
+            env={**os.environ, 'PATH':directory+os.pathsep+os.environ['PATH'], 'ESP_RESET_URL':'http://ignored-without-explicit-ip'}
+            cases=[([],False),(['--port','/dev/test'],False),(['--ip','192.168.3.6'],True),(['--url','http://192.168.3.6'],True),(['--ip=192.168.3.6'],True),(['--url=http://192.168.3.6'],True)]
+            for command in ('reset','loader','maskrom','status'):
+                for flags, network_mode in cases:
+                    with self.subTest(command=command, flags=flags):
+                        output=subprocess.check_output(['sh',str(launcher),command,*flags],env=env,text=True)
+                        self.assertIn('/network.py' if network_mode else '/device.py',output)
+                        if network_mode:
+                            self.assertNotIn('esptool',output)
+                            self.assertNotIn('pyserial',output)
+
+    def test_ip_alias_is_accepted(self):
+        with patch.object(network,'run_action',return_value=0) as run, contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(network.main(['reset','--ip','192.168.3.6']),0)
+            run.assert_called_once_with('http://192.168.3.6','reset',1,1500)

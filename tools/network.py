@@ -104,7 +104,7 @@ def wait_action(url, action_id, boot):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command', choices=('status', 'reset', 'loader', 'maskrom', 'result'))
-    parser.add_argument('--url', default=os.environ.get('ESP_RESET_URL', ''))
+    parser.add_argument('--url', '--ip', dest='url', default=os.environ.get('ESP_RESET_URL', ''))
     parser.add_argument('--channel', type=int, choices=(1, 2, 3), default=1)
     parser.add_argument('--hold-ms', type=int, default=1500)
     parser.add_argument('--clear-unknown', action='store_true', help='result only: acknowledge unknown result and unlock, without pressing any button')

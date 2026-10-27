@@ -149,7 +149,7 @@ def monitor(usb):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command', nargs='?', default='setup',
-                        choices=['setup', 'flash', 'monitor', 'wifi', 'status', 'reset', 'loader', 'maskrom', 'ports', 'usb-status'])
+                        choices=['setup', 'flash', 'monitor', 'wifi', 'status', 'reset', 'loader', 'maskrom', 'ports', 'usb-status', 'result'])
     parser.add_argument('--port')
     parser.add_argument('--baud', type=int, default=115200)
     parser.add_argument('--no-stub', action='store_true')
@@ -162,6 +162,9 @@ def main(argv=None):
     usb = USB(args.port)
     print('后台密码：' + PASSWORD)
     try:
+        if args.command == 'result':
+            print('USB 操作通过串口同步返回结果；查询历史网络操作请用 result.sh --ip ESP的IP。')
+            return 1
         if args.command == 'ports':
             for p in list_ports.comports():
                 print(p.device, p.description, p.serial_number or '')

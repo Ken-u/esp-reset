@@ -17,9 +17,17 @@ device_script="$bundle_dir/device.py"
 if [ -f "$bundle_dir/tools/device.py" ]; then device_script="$bundle_dir/tools/device.py"; fi
 case "${1:-setup}" in
     reset|loader|maskrom|status|result)
-        network_script="$bundle_dir/network.py"
-        if [ -f "$bundle_dir/tools/network.py" ]; then network_script="$bundle_dir/tools/network.py"; fi
-        exec "$uv_bin" run --no-project --python 3.12 "$network_script" "$@"
+        use_network=false
+        for argument in "$@"; do
+            case "$argument" in
+                --url|--url=*|--ip|--ip=*) use_network=true ;;
+            esac
+        done
+        if [ "$use_network" = true ]; then
+            network_script="$bundle_dir/network.py"
+            if [ -f "$bundle_dir/tools/network.py" ]; then network_script="$bundle_dir/tools/network.py"; fi
+            exec "$uv_bin" run --no-project --python 3.12 "$network_script" "$@"
+        fi
         ;;
 esac
 exec "$uv_bin" run --no-project --python 3.12 --with esptool==5.6.0 --with pyserial==3.5 python -u "$device_script" "$@"
