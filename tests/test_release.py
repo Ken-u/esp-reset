@@ -20,6 +20,8 @@ class ReleaseTests(unittest.TestCase):
             subprocess.run(['git','-c','user.name=Test','-c','user.email=test@example.com','commit','-qm','base'],cwd=root,check=True)
             before=subprocess.check_output(['git','rev-parse','HEAD'],cwd=root,text=True).strip()
             event={'before':before}
+            self.assertEqual(release.plan(root,'push','refs/heads/main',event)['publish'],'true') # Unpublished version retries.
+            subprocess.run(['git','tag','v0.5.0'],cwd=root,check=True)
             self.assertEqual(release.plan(root,'push','refs/heads/main',event)['publish'],'false')
             (root/'version.txt').write_text('0.5.1\n')
             self.assertEqual(release.plan(root,'push','refs/heads/main',event)['publish'],'true')

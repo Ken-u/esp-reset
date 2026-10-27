@@ -16,10 +16,15 @@ module.exports = async ({github, context, core, directory = 'release-assets', ve
     }));
     if (checksums.size !== names.length) throw Error('Checksum count mismatch');
     for (const name of names) if (crypto.createHash('sha256').update(fs.readFileSync(path.join(directory,name))).digest('hex') !== checksums.get(name)) throw Error('Checksum mismatch: '+name);
+    let tagExists = false;
     try {
-        const commit = await github.rest.repos.getCommit({...repo, ref:tag});
-        if (commit.data.sha !== sha) throw Error('Refusing to reuse tag pointing to another commit');
+        await github.rest.git.getRef({...repo,ref:`tags/${tag}`});
+        tagExists = true;
     } catch (error) { if (error.status !== 404) throw error; }
+    if (tagExists) {
+        const commit = await github.rest.repos.getCommit({...repo,ref:tag});
+        if (commit.data.sha !== sha) throw Error('Refusing to reuse tag pointing to another commit');
+    }
     let release;
     try { release = (await github.rest.repos.getReleaseByTag({...repo,tag})).data; }
     catch (error) { if (error.status !== 404) throw error; }
