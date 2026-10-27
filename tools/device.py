@@ -100,6 +100,22 @@ class USB:
         raise TimeoutError(f'{op} 未收到确认。操作可能已执行，脚本不会自动重试。')
 
 
+    def status_when_ready(self, timeout=60):
+        """Only read-only status queries may be retried across USB startup."""
+        deadline = time.monotonic() + timeout
+        last_error = None
+        while time.monotonic() < deadline:
+            try:
+                if not self.connection:
+                    self.connect(timeout=min(3, max(0.1, deadline - time.monotonic())))
+                return self.request('status', timeout=3)
+            except (serial.SerialException, OSError, TimeoutError) as exc:
+                last_error = exc
+                self.close()
+                time.sleep(0.25)
+        raise TimeoutError(f'等待固件响应超时：{last_error}。若在下载模式，请按 EN/RESET。')
+
+
 def show_status(value):
     print(f'后台密码：{value.get("password", PASSWORD)}')
     if value.get('connected') and value.get('ip'):
@@ -157,15 +173,7 @@ def main(argv=None):
             if result:
                 return result
             print('刷写完成。如果仍在下载模式，请按 EN/RESET（不要按 BOOT）。')
-            usb.connect(timeout=60)
-            # Status is safe to retry while the application is still starting.
-            for attempt in range(4):
-                try:
-                    show_status(usb.request('status', timeout=3))
-                    break
-                except TimeoutError:
-                    if attempt == 3:
-                        raise
+            show_status(usb.status_when_ready())
             if args.command == 'flash':
                 return 0
         if args.command in ('wifi', 'setup'):
