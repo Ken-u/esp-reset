@@ -1,0 +1,44 @@
+name: Build and test
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  host-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.x'
+      - run: python3 -m unittest discover -s tests -v
+      - run: python3 -m py_compile tools/*.py
+      - run: git diff --check
+  firmware:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: esp32s3
+            board: esp32s3-n16r8
+          - target: esp32c3
+            board: esp32c3-supermini
+    container: espressif/idf:v5.5.4
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build firmware
+        shell: bash
+        run: |
+          . /opt/esp/idf/export.sh
+          idf.py set-target ${{ matrix.target }}
+          idf.py build
+          python3 tools/package_firmware.py build dist/${{ matrix.board }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: esp-reset-${{ matrix.board }}
+          path: dist/${{ matrix.board }}/
+          if-no-files-found: error
