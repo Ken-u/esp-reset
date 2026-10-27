@@ -30,17 +30,21 @@ GPIO 是芯片编号，以板上丝印为准。**C3 已按此板的限制禁用 
 
 ## 从构建产物刷机
 
-在仓库 **Actions → 最新成功的 Build and test → Artifacts** 下载对应的：
+在仓库 [Releases](https://github.com/Ken-u/esp-reset/releases) 下载匹配板型的完整 `.zip`：
 
-- `esp-reset-esp32s3-n16r8`
-- `esp-reset-esp32c3-supermini`
+- `esp-reset-esp32s3-n16r8-v版本号.zip`
+- `esp-reset-esp32c3-supermini-v版本号.zip`
+
+已有固件只做网页OTA时，下载对应板型的 `-ota.bin`。`SHA256SUMS` 覆盖两套ZIP和两套OTA文件。ZIP展开为一个独立目录，里面只有一个入口 `./espreset`，其余工具为内部实现。
+
+`./espreset` 或 `./espreset --help` 显示全部命令，不安装依赖、不执行刷写。也支持 `sh espreset ...`。参数可放在命令前或命令后，例如 `./espreset --ip 192.168.3.6 loader`。
 
 解压后接 **原生 USB / OTG** 口，关闭其他串口程序，执行：
 
 ```bash
-sh setup.sh
+./espreset setup
 # 多设备时显式指定，例如 macOS：
-sh setup.sh --port /dev/cu.usbmodem5A450470201
+./espreset setup --port /dev/cu.usbmodem5A450470201
 ```
 
 脚本自动准备 uv、Python 3.12、esptool 5.6.0、pyserial 3.5，读取固件自带地址刷写，隐藏输入 Wi-Fi 密码，等待联网并打印后台网页地址，最后进入自动重连串口监视。默认 115200 刷写，支持 `--baud 460800` 和 `--no-stub`。第一次下载工具和依赖需要互联网。
@@ -49,33 +53,33 @@ sh setup.sh --port /dev/cu.usbmodem5A450470201
 
 如需手动下载：按住 BOOT，点 RESET/EN，松开 BOOT 后刷写。刷完若仍在 ROM 下载模式，点 EN（不按 BOOT）运行。Linux 若串口权限不足，需要系统管理员授予串口设备访问权限。
 
-下载包根目录只放 README、SHA256SUMS 和入口脚本；二进制在 `firmware/`，内部 Python 工具在 `tools/`。依赖位于 uv 缓存，缺少 uv 时安装到包内 `.tools/`，不修改 shell 配置。
+下载包根目录只有一个脚本入口 `espreset`，以及 README、SHA256SUMS 和版本文件；二进制在 `firmware/`，内部 Python 工具在 `tools/`。依赖位于 uv 缓存，缺少 uv 时安装到包内 `.tools/`，不修改 shell 配置。
 
 | 命令 | 用途 |
 | --- | --- |
-| `sh setup.sh` | 准备环境 → 刷写 → USB 配网 → 看串口 |
-| `sh flash.sh` | 仅刷写，打印密码及设备状态 |
-| `sh wifi.sh` | 单独 USB 配网，联网后打印网页地址 |
-| `sh monitor.sh` | 看串口，RESET 后自动重连 |
-| `sh status.sh --url http://ESP的IP` | HTTP 查询状态，无需串口 |
-| `sh reset.sh --url http://ESP的IP --channel 1` | HTTP 单路复位，支持 1/2/3 |
-| `sh loader.sh --url http://ESP的IP` | HTTP RECOVERY + RESET |
-| `sh maskrom.sh --url http://ESP的IP` | HTTP MASKROM + RESET |
-| `sh result.sh` | 只查询上一次操作，不按键 |
+| `./espreset setup` | 准备环境 → 刷写 → USB 配网 → 看串口 |
+| `./espreset flash` | 仅刷写，打印密码及设备状态 |
+| `./espreset wifi` | 单独 USB 配网，联网后打印网页地址 |
+| `./espreset monitor` | 看串口，RESET 后自动重连 |
+| `./espreset status --url http://ESP的IP` | HTTP 查询状态，无需串口 |
+| `./espreset reset --url http://ESP的IP --channel 1` | HTTP 单路复位，支持 1/2/3 |
+| `./espreset loader --url http://ESP的IP` | HTTP RECOVERY + RESET |
+| `./espreset maskrom --url http://ESP的IP` | HTTP MASKROM + RESET |
+| `./espreset result --ip ESP的IP` | 只查询上一次操作，不按键 |
 
-**控制脚本双模式：明确指定 `--ip` / `--url` 时通过网络，否则走原生 USB。** 网络模式不需要把 ESP 接到电脑。 ESP 和目标板按接线图连接并共地（使用隔离开关时按模块要求）。USB 只用于刷机和可选的首次配网。例如 `sh reset.sh --ip 192.168.3.6 --channel 3` 走网络；`sh reset.sh --channel 3` 走 USB，多个串口可加 `--port`。不指定IP时不会根据历史地址或环境变量自动切到网络。USB 配网会保存设备地址供查看。刷写/USB入口支持 `--port`；`sh run.sh ports` 列串口，`sh run.sh usb-status` 通过USB查状态。
+**控制脚本双模式：明确指定 `--ip` / `--url` 时通过网络，否则走原生 USB。** 网络模式不需要把 ESP 接到电脑。 ESP 和目标板按接线图连接并共地（使用隔离开关时按模块要求）。USB 只用于刷机和可选的首次配网。例如 `./espreset reset --ip 192.168.3.6 --channel 3` 走网络；`./espreset reset --channel 3` 走 USB，多个串口可加 `--port`。不指定IP时不会根据历史地址或环境变量自动切到网络。USB 配网会保存设备地址供查看。刷写/USB入口支持 `--port`；`./espreset ports` 列串口，`./espreset status` 通过USB查状态。
 
 ### 网页组合与操作回执
 
 网页新增 Loader / Maskrom 按钮，调用与脚本相同的动作服务。`POST /api/action` 提交 `{boot_id,request_id,mode,channel,hold_ms}`，返回202后由独立任务执行；`GET /api/action?id=...` 查询 queued/running/released/failed，查询不会触发GPIO。`/api/status` 提供本次启动唯一 `boot_id` 及每路 `pulse_count`、`last_request_id`、`pressed_us`、`released_us`，这些是固件GPIO驱动调用记录，不是对外部电压的测量。
 
-网页和脚本保留最近操作编号供查询，但回执不再锁定后续操作。**每次手动运行控制脚本、每次重新点击网页按钮都会创建新的操作编号**；无论旧结果是否未知、ESP是否重启，都不会因为本地历史记录拒绝新操作。每次提交前重新获取当前ESP启动编号。请求超时不会自动重发。网页仅在发送请求期间防止重复点击，发送完成或超时后恢复按钮；`result.sh` / 网页查询按钮只查结果，不触发按键。此前生成的 `last-action.json` 不需要删除。
+网页和脚本保留最近操作编号供查询，但回执不再锁定后续操作。**每次手动运行控制脚本、每次重新点击网页按钮都会创建新的操作编号**；无论旧结果是否未知、ESP是否重启，都不会因为本地历史记录拒绝新操作。每次提交前重新获取当前ESP启动编号。请求超时不会自动重发。网页仅在发送请求期间防止重复点击，发送完成或超时后恢复按钮；`./espreset result` / 网页查询按钮只查结果，不触发按键。此前生成的 `last-action.json` 不需要删除。
 
 ESP每次启动保存最近16个动作回执，不跨重启；固件仍保留按键执行期间的资源互斥及3秒硬件冷却。GPIO6导致目标板两次重启的实物根因尚未确认，需要结合新的执行记录或逻辑分析仪检查。
 
 ### Loader / Maskrom 接线
 
-独立三路复位照旧使用 `reset.sh --channel N`。**只有将三路改接同一目标板的三个按键时，才使用 loader / maskrom**：
+独立三路复位照旧使用 `./espreset reset --channel N`。**只有将三路改接同一目标板的三个按键时，才使用 loader / maskrom**：
 
 | 通道 | S3 | C3 | 组合模式用途 |
 | --- | --- | --- | --- |
@@ -124,6 +128,17 @@ python3 tools/esp_reset.py --url http://192.168.1.50 ota esp-reset.bin
 除 `/` 外均需请求头 `X-Reset-Token: <管理密码>`。JSON 请求需 `Content-Type: application/json`。复位冷却/维护中返回 409；松开后才返回 `{"ok":true,"state":"released"}`。`channel` **必须明确填写整数 1、2 或 3**，遗漏或非法值返回 400，绝不默认复位某一路。成功回执还包含实际 `channel` 和 `gpio`。request_id 是同次操作的幂等键，去重只覆盖该路本次启动中最近 8 个成功请求，不跨重启、不跨通道、不无限缓存。
 
 从单路 0.1 版升级后请刷新网页并更新 CLI/API 调用；升级保留 Wi-Fi，管理密码改为固定值。原有不带 channel 的请求会被拒绝。
+
+## 版本与自动 Release
+
+版本号只修改根目录 `version.txt`，格式为 `主.次.修订`（例如当前 `0.5.0`），不再修改CMake里的版本。ESP-IDF、网页固件版本、ZIP和OTA文件名使用同一个值。
+
+1. 修改代码及 `version.txt`，合入 `main`。
+2. CI检查版本不倒退，执行主机测试并构建C3/S3，验证真实构建版本、GPIO和Flash配置。
+3. 仅当 `main` 本次push的版本与push前不同时，自动创建 `v版本号` Release。分支、PR、普通同版本提交和手动workflow_dispatch只构建产物，不发布。
+4. 两种板的ZIP、OTA和SHA256SUMS全部上传后才公开发布；失败保留草稿，可对原工作流重新运行。不会覆盖已发布版本，也不会把同名tag移到别的commit。
+
+不需要手动打tag，也不需要PAT或额外secret；发布job使用仓库GITHUB_TOKEN的contents写权限，构建job保持只读。相同分支工作流排队执行，避免版本发布相互取消。
 
 ## 从源码构建
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""USB setup and control. Dependencies are provisioned by run.sh with uv."""
+"""USB setup and control. Dependencies are provisioned by espreset with uv."""
 import argparse
 import getpass
 import json
@@ -123,9 +123,9 @@ def show_status(value):
         print(f'后台网页：{url}/')
         config = Path(__file__).resolve().parent.parent / 'device.json'
         config.write_text(json.dumps({'url': url}) + '\n')
-        print(f'网络控制：sh reset.sh --url {url} --channel 1')
+        print(f'网络控制：./espreset reset --url {url} --channel 1')
     else:
-        print('Wi-Fi 尚未连接。运行 sh wifi.sh 通过 USB 配网。')
+        print('Wi-Fi 尚未连接。运行 ./espreset wifi 通过 USB 配网。')
 
 
 def monitor(usb):
@@ -163,7 +163,7 @@ def main(argv=None):
     print('后台密码：' + PASSWORD)
     try:
         if args.command == 'result':
-            print('USB 操作通过串口同步返回结果；查询历史网络操作请用 result.sh --ip ESP的IP。')
+            print('USB 操作通过串口同步返回结果；查询历史网络操作请用 ./espreset result --ip ESP的IP。')
             return 1
         if args.command == 'ports':
             for p in list_ports.comports():
@@ -198,7 +198,7 @@ def main(argv=None):
                     break
                 time.sleep(1)
             else:
-                raise TimeoutError('60 秒内未联网。请检查 SSID/密码及 2.4GHz 网络，重新运行 wifi.sh。')
+                raise TimeoutError('60 秒内未联网。请检查 SSID/密码及 2.4GHz 网络，重新运行 ./espreset wifi。')
             if args.command == 'wifi':
                 return 0
         if args.command in ('setup', 'monitor'):

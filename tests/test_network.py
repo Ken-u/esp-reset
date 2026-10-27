@@ -62,7 +62,7 @@ class NetworkTests(unittest.TestCase):
                 self.assertEqual(wait.call_count,2)
 
     def test_wrapper_selects_http_only_when_ip_is_explicit(self):
-        launcher=Path(__file__).resolve().parents[1]/'tools/run.sh'
+        launcher=Path(__file__).resolve().parents[1]/'tools/espreset'
         with tempfile.TemporaryDirectory() as directory:
             uv=Path(directory)/'uv'
             uv.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\n')
@@ -77,6 +77,15 @@ class NetworkTests(unittest.TestCase):
                         if network_mode:
                             self.assertNotIn('esptool',output)
                             self.assertNotIn('pyserial',output)
+
+    def test_options_before_command_also_select_network(self):
+        launcher=Path(__file__).resolve().parents[1]/'tools/espreset'
+        with tempfile.TemporaryDirectory() as directory:
+            uv=Path(directory)/'uv';uv.write_text('#!/bin/sh\nprintf "%s\\n" "$@"\n');uv.chmod(0o755)
+            env={**os.environ,'PATH':directory+os.pathsep+os.environ['PATH']}
+            output=subprocess.check_output(['sh',str(launcher),'--ip','192.168.3.6','loader'],env=env,text=True)
+            self.assertIn('/network.py',output)
+            self.assertNotIn('esptool',output)
 
     def test_ip_alias_is_accepted(self):
         with patch.object(network,'run_action',return_value=0) as run, contextlib.redirect_stdout(io.StringIO()):

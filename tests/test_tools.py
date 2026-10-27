@@ -8,6 +8,8 @@ from pathlib import Path
 import tempfile
 import threading
 import unittest
+import os
+import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -37,6 +39,12 @@ class ToolTests(unittest.TestCase):
                       'flash_settings': {'flash_mode': 'dio', 'flash_freq': '40m', 'flash_size': '16MB'}}
             (build/'flasher_args.json').write_text(json.dumps(config))
             packager.package(build, output)
+            self.assertEqual({p.name for p in output.iterdir()}, {'espreset','README.txt','SHA256SUMS','version.txt','firmware','tools','docs'})
+            self.assertTrue(os.access(output/'espreset', os.X_OK))
+            env = {**os.environ, 'PATH':'/usr/bin:/bin'}
+            help_text = subprocess.check_output([str(output/'espreset'),'--help'], env=env, text=True)
+            self.assertIn('--ip',help_text)
+            self.assertFalse((output/'.tools').exists())
             command = flasher.flash_command(output/'firmware', '/dev/test', 460800)
             self.assertIn('esp32s3', command)
             self.assertIn('16MB', command)

@@ -98,7 +98,7 @@ def wait_action(url, action_id, boot):
         except OSError as exc:
             last_error = str(exc)
         time.sleep(0.3)
-    raise TimeoutError(f'结果未知：{last_error}；操作编号 {action_id}。用 sh run.sh result 查询；不要直接重发按键。')
+    raise TimeoutError(f'结果未知：{last_error}；操作编号 {action_id}。用 ./espreset result 查询；不要直接重发按键。')
 
 
 def main(argv=None):

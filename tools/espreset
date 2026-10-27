@@ -1,0 +1,86 @@
+#!/bin/sh
+set -eu
+usage() {
+    cat <<'HELP'
+ESP Reset — macOS / Linux 单一入口
+
+用法：./espreset <命令> [参数]
+
+命令：
+  setup       准备环境 → 刷固件 → USB配网 → 看串口
+  flash       只刷固件
+  wifi        USB配网，隐藏输入Wi-Fi密码，显示后台地址
+  monitor     USB串口监视，RESET后自动重连
+  ports       列举串口
+  status      查看状态
+  reset       单路复位（默认通道1）
+  loader      RECOVERY + RESET 组合
+  maskrom     MASKROM + RESET 组合
+  result      查询最近网络操作（需指定IP，不触发按键）
+
+参数：
+  --ip ADDRESS         指定IP走HTTP；也支持 --url http://ADDRESS
+  --port DEVICE        USB指定串口；不指定则自动检测唯一ESP
+  --channel 1|2|3      reset通道
+  --hold-ms 1500       loader/maskrom模式键在RESET释放后保持时间
+  --ssid NAME          wifi/setup的Wi-Fi名称；密码交互输入
+  --baud 115200        flash/setup刷写波特率
+  --no-stub            绕过esptool stub
+  --clear-unknown      result清除本地结果标记，不按键
+  -h, --help           显示帮助，不安装依赖
+
+示例：
+  ./espreset setup
+  ./espreset reset --ip 192.168.3.6 --channel 3
+  ./espreset --ip 192.168.3.6 loader
+  ./espreset reset --channel 3
+  ./espreset maskrom --port /dev/cu.usbmodemXXXX
+
+指定 --ip/--url 走网络，否则走原生USB/OTG；网络失败不会改走USB。
+回执仅供查询，不锁定后续手动操作。后台密码：esp32reset。
+首次执行自动使用uv准备Python；无需ESP-IDF或编译环境。
+HELP
+}
+if [ "$#" -eq 0 ]; then usage; exit 0; fi
+control_command=
+use_network=false
+skip_value=false
+for argument in "$@"; do
+    if [ "$skip_value" = true ]; then skip_value=false; continue; fi
+    case "$argument" in
+        -h|--help) usage; exit 0 ;;
+        --ip|--url) use_network=true; skip_value=true ;;
+        --ip=*|--url=*) use_network=true ;;
+        --port|--baud|--ssid|--channel|--hold-ms) skip_value=true ;;
+        --*=*|--no-stub|--clear-unknown) ;;
+        setup|flash|wifi|monitor|ports|status|usb-status|reset|loader|maskrom|result)
+            if [ -z "$control_command" ]; then control_command=$argument; fi ;;
+    esac
+done
+if [ -z "$control_command" ]; then echo '缺少有效命令。使用 ./espreset --help 查看用法。' >&2; exit 2; fi
+case "$control_command" in
+    reset|loader|maskrom|status|result) ;;
+    *) if [ "$use_network" = true ]; then echo '此命令需要USB，请去掉 --ip/--url。' >&2; exit 2; fi ;;
+esac
+if [ "$control_command" = result ] && [ "$use_network" = false ]; then
+    echo 'result 用于查询网络操作，请指定 --ip。' >&2; exit 2
+fi
+echo '准备运行环境（首次可能需要下载 uv / Python）…'
+bundle_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+if command -v uv >/dev/null 2>&1; then
+    uv_bin=$(command -v uv)
+else
+    uv_bin="$bundle_dir/.tools/uv"
+    if [ ! -x "$uv_bin" ]; then
+        echo '安装 uv 到本目录 .tools（不修改 shell 配置）…'
+        mkdir -p "$bundle_dir/.tools"
+        curl -LsSf https://astral.sh/uv/install.sh -o "$bundle_dir/.tools/install-uv.sh"
+        UV_UNMANAGED_INSTALL="$bundle_dir/.tools" sh "$bundle_dir/.tools/install-uv.sh"
+    fi
+fi
+script_dir=$bundle_dir
+if [ -f "$bundle_dir/tools/device.py" ]; then script_dir="$bundle_dir/tools"; fi
+if [ "$use_network" = true ]; then
+    exec "$uv_bin" run --no-project --python 3.12 "$script_dir/network.py" "$@"
+fi
+exec "$uv_bin" run --no-project --python 3.12 --with esptool==5.6.0 --with pyserial==3.5 python -u "$script_dir/device.py" "$@"
