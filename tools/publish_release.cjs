@@ -23,6 +23,13 @@ module.exports = async ({github, context, core, directory = 'release-assets', ve
     let release;
     try { release = (await github.rest.repos.getReleaseByTag({...repo,tag})).data; }
     catch (error) { if (error.status !== 404) throw error; }
+    if (!release) {
+        // The by-tag endpoint documents published releases only; drafts require listing.
+        const drafts = (await github.paginate(github.rest.repos.listReleases,{...repo,per_page:100}))
+            .filter(item => item.draft && item.tag_name === tag);
+        if (drafts.length > 1) throw Error('Multiple drafts exist for this version');
+        release = drafts[0];
+    }
     if (release && !release.draft) {
         const assets = await github.paginate(github.rest.repos.listReleaseAssets,{...repo,release_id:release.id,per_page:100});
         if (!expected.every(name => assets.some(asset => asset.name === name))) throw Error('Published release is incomplete; refusing to overwrite');
