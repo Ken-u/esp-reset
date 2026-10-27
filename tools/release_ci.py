@@ -45,7 +45,9 @@ def plan(root, event_name, ref, event):
     old = previous_version(root, before)
     if old and tuple(map(int, version.split('.'))) < tuple(map(int, old.split('.'))):
         raise ValueError(f'Version cannot decrease: {old} -> {version}')
-    publish = event_name == 'push' and ref == 'refs/heads/main' and version != old
+    tag_exists = subprocess.run(['git','show-ref','--verify','--quiet',f'refs/tags/v{version}'], cwd=root).returncode == 0
+    # A failed first publish creates no tag: a same-version fix can retry it.
+    publish = event_name == 'push' and ref == 'refs/heads/main' and (version != old or not tag_exists)
     return {'version': version, 'publish': str(publish).lower()}
 
 

@@ -18,7 +18,7 @@ function fixture({failUpload=false,wrongTag=false}={}){
   uploadReleaseAsset:async args=>{calls.push('upload');if(failUpload)throw Error('upload interrupted');assets.push({id:assets.length+1,name:args.name,state:'uploaded'});},
   updateRelease:async args=>{calls.push('publish');assert.equal(args.draft,false);assert.equal(assets.length,5);release.draft=false;}
  };
- const github={rest:{repos},paginate:async(fn,args)=>(await fn(args)).data};
+ const github={rest:{repos,git:{getRef:async()=>wrongTag?{data:{object:{sha:'wrong'}}}:notFound()}},paginate:async(fn,args)=>(await fn(args)).data};
  const args={github,context:{repo:{owner:'test',repo:'test'},sha:'commit-one',eventName:'push',ref:'refs/heads/main'},core:{info(){}},directory,version:'0.5.0'};
  return{args,calls,resume:()=>{failUpload=false;}};
 }

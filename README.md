@@ -135,7 +135,7 @@ python3 tools/esp_reset.py --url http://192.168.1.50 ota esp-reset.bin
 
 1. 修改代码及 `version.txt`，合入 `main`。
 2. CI检查版本不倒退，执行主机测试并构建C3/S3，验证真实构建版本、GPIO和Flash配置。
-3. 仅当 `main` 本次push的版本与push前不同时，自动创建 `v版本号` Release。分支、PR、普通同版本提交和手动workflow_dispatch只构建产物，不发布。
+3. 仅当 `main` 本次push的版本与push前不同时，自动创建 `v版本号` Release。分支、PR、已发布版本的同版本提交和手动workflow_dispatch只构建产物，不发布；尚未生成版本tag的失败发布，会在下一次main提交时继续尝试。
 4. 两种板的ZIP、OTA和SHA256SUMS全部上传后才公开发布；失败保留草稿，可对原工作流重新运行。不会覆盖已发布版本，也不会把同名tag移到别的commit。
 
 不需要手动打tag，也不需要PAT或额外secret；发布job使用仓库GITHUB_TOKEN的contents写权限，构建job保持只读。相同分支工作流排队执行，避免版本发布相互取消。
