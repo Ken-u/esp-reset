@@ -40,37 +40,24 @@ class NetworkTests(unittest.TestCase):
                 self.assertEqual(receipt['state'],'released')
         finally: server.shutdown();server.server_close()
 
-    def test_pending_request_is_queried_instead_of_new_action(self):
+    def test_old_pending_receipt_never_blocks_new_manual_invocations(self):
         with tempfile.TemporaryDirectory() as directory, patch.object(network,'CONFIG',Path(directory)/'device.json'):
-            (Path(directory)/'last-action.json').write_text(json.dumps({'url':'http://esp','state':'pending','request_id':'old','boot_id':'boot-one'}))
-            with patch.object(network,'wait_action',return_value=0) as wait, patch.object(network,'request') as request, contextlib.redirect_stdout(io.StringIO()):
-                self.assertEqual(network.run_action('http://esp','reset',3,1500),0)
-                wait.assert_called_once_with('http://esp','old','boot-one')
-                request.assert_not_called()
-
-    def test_restart_closes_pending_but_never_sends_until_next_invocation(self):
-        for missing in (False, True):
-            with self.subTest(missing_receipt=missing), tempfile.TemporaryDirectory() as directory, patch.object(network, 'CONFIG', Path(directory)/'device.json'):
-                receipt = Path(directory)/'last-action.json'
-                receipt.write_text(json.dumps({'url':'http://esp','state':'pending','request_id':'old','boot_id':'old-boot'}))
-                posts = []
-                def request(url, path, payload=None):
-                    if payload is not None:
-                        posts.append(payload)
-                        return {'ok':True,'boot_id':'new-boot','state':'queued'}
-                    if path == '/api/status':
-                        return {'ok':True,'boot_id':'new-boot'}
-                    if path.endswith('id=old') and missing:
-                        raise network.urllib.error.HTTPError(url,404,'missing',{},None)
-                    return {'ok':True,'boot_id':'new-boot','state':'released'}
-                with patch.object(network, 'request', side_effect=request), contextlib.redirect_stdout(io.StringIO()):
-                    with self.assertRaisesRegex(ValueError, '已解除旧操作锁'):
+            receipt = Path(directory)/'last-action.json'
+            receipt.write_text(json.dumps({'url':'http://esp','state':'pending','request_id':'old','boot_id':'old-boot'}))
+            posts=[]
+            def request(url, path, payload=None):
+                if payload is not None:
+                    posts.append(payload)
+                    return {'ok':True,'boot_id':'new-boot','state':'queued'}
+                return {'ok':True,'boot_id':'new-boot'}
+            with patch.object(network,'wait_action',side_effect=TimeoutError('lost receipt')) as wait, patch.object(network,'request',side_effect=request), contextlib.redirect_stdout(io.StringIO()):
+                for unused in range(2):
+                    with self.assertRaises(TimeoutError):
                         network.run_action('http://esp','reset',3,1500)
-                    self.assertEqual(posts, [])
-                    self.assertEqual(json.loads(receipt.read_text())['state'], 'unknown_after_restart')
-                    self.assertEqual(network.run_action('http://esp','reset',3,1500), 0)
-                    self.assertEqual(len(posts), 1)
-                    self.assertEqual(posts[0]['boot_id'], 'new-boot')
+                self.assertEqual(len(posts),2)
+                self.assertNotEqual(posts[0]['request_id'],posts[1]['request_id'])
+                self.assertTrue(all(p['boot_id']=='new-boot' for p in posts))
+                self.assertEqual(wait.call_count,2)
 
     def test_network_wrapper_does_not_require_serial_or_esptool(self):
         source=(Path(__file__).resolve().parents[1]/'tools/run.sh').read_text()

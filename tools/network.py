@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Control ESP Reset over HTTP. No serial connection or third-party modules."""
 import argparse
-import fcntl
 import json
 import os
 from pathlib import Path
@@ -40,18 +39,13 @@ def save_terminal(action_id, state):
 
 def controller_restarted(action_id):
     # Close the local pending record without pretending the old pulse failed.
-    # The current invocation stops here; a later explicit invocation is a new action.
+    # The current invocation stops here; each later explicit invocation is a new action.
     save_terminal(action_id, 'unknown_after_restart')
-    raise ValueError('ESP 已重启，旧操作结果未知，已解除旧操作锁。本次未重发；确认目标状态后，再次手动执行即可。')
+    raise ValueError('ESP 已重启，旧操作结果未知，本次未重发；不影响下一次手动操作。')
 
 
 def run_action(url, mode, channel, hold_ms):
     receipt_file = CONFIG.with_name('last-action.json')
-    if receipt_file.exists():
-        previous = json.loads(receipt_file.read_text())
-        if previous.get('state') == 'pending' and previous.get('url') == url:
-            print('已有未确认操作，本次只查询旧操作，不会发送新的按键请求。', flush=True)
-            return wait_action(url, previous['request_id'], previous['boot_id'])
     before = request(url, '/api/status')
     boot = before.get('boot_id')
     if not boot:
@@ -119,14 +113,7 @@ def main(argv=None):
         parser.error('--clear-unknown is only valid with result')
     if not 100 <= args.hold_ms <= 10000:
         parser.error('--hold-ms must be 100..10000')
-    control_lock = None
     try:
-        if args.command != 'status':
-            control_lock = CONFIG.with_name('.control.lock').open('w')
-            try:
-                fcntl.flock(control_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except BlockingIOError:
-                raise ValueError('已有网络控制脚本运行中，请等待其结束。')
         if args.command == 'result':
             saved = json.loads(CONFIG.with_name('last-action.json').read_text())
             if args.clear_unknown:
@@ -148,9 +135,6 @@ def main(argv=None):
     except (OSError, ValueError, KeyError, TimeoutError) as exc:
         print(str(exc), file=sys.stderr)
         return 1
-    finally:
-        if control_lock is not None:
-            control_lock.close()
 
 
 if __name__ == '__main__':

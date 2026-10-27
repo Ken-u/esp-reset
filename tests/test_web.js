@@ -11,7 +11,7 @@ class Element{
  querySelector(t){return this.children.find(n=>n.tag===t);}append(n){this.children.push(n);}replaceChildren(){this.children=[];}addEventListener(){}
 }
 for(const m of html.split('<script>')[0].matchAll(/\bid="([^"]+)"/g)){const n=new Element();n.id=m[1];}
-let postLost=false,queryLost=false,releaseQuery=null,deferQuery=false;
+let postLost=false,queryLost=false,releasePost=null,deferPost=false;
 let active=null;const posts=[];
 const ctx=vm.createContext({
  document:{getElementById:id=>nodes.get(id),createElement:()=>new Element(),querySelectorAll:()=>[...nodes.values()].filter(n=>n.dataset.resetChannel)},
@@ -22,33 +22,34 @@ const ctx=vm.createContext({
   if(url==='/api/status')return response({boot_id:'boot-one',channels:[1,2,3].map(channel=>({channel,gpio:channel+3,cooldown_ms:0,reset_count:0,enabled:true,active:false})),connected:true,ssid:'test',ip:'',target:'esp32s3',version:'0.4.0',uptime_s:1,reset_count:0});
   if(options.method==='POST'){
    assert.equal(url,'/api/action');active=JSON.parse(options.body);posts.push(active);
+   if(deferPost)await new Promise(r=>{releasePost=r;});
    if(postLost)throw Error('signal timed out');return response({state:'queued',request_id:active.request_id,boot_id:'boot-one'});
   }
-  assert.equal(url,'/api/action?id='+active.request_id);
+  assert.ok(url.startsWith('/api/action?id='));
   if(queryLost)throw Error('signal timed out');
-  if(deferQuery)await new Promise(r=>{releaseQuery=r;});
-  return response({state:'released',request_id:active.request_id,boot_id:'boot-one',pins:[]});
+  return response({state:'released',request_id:url.split('id=')[1],boot_id:'boot-one',pins:[]});
  }
 });
 async function run(){
+ storage.set('esp-reset-action',JSON.stringify({request_id:'old',boot_id:'old-boot',label:'旧操作'}));
  vm.runInContext(source,ctx);vm.runInContext("token='test-token'",ctx);await vm.runInContext('refresh()',ctx);
- deferQuery=true;const pending=vm.runInContext('resetChannel(3)',ctx);
+ assert.equal(nodes.get('boot-loader').disabled,false); // Historical pending receipt is informational.
+ deferPost=true;const pending=vm.runInContext('resetChannel(3)',ctx);
  await new Promise(r=>setImmediate(r));
  assert.equal(posts.length,1);assert.equal(posts[0].channel,3);
  assert.equal(nodes.get('reset-3').disabled,true);assert.equal(nodes.get('boot-loader').disabled,true);
  await vm.runInContext('resetChannel(3)',ctx);assert.equal(posts.length,1);
- releaseQuery();deferQuery=false;await pending;
- await new Promise(r=>setImmediate(r));postLost=true;await vm.runInContext("startAction('loader',2)",ctx);
- await new Promise(r=>setImmediate(r));await vm.runInContext('checkAction()',ctx);
+ releasePost();deferPost=false;await pending;await new Promise(r=>setImmediate(r));
+ postLost=true;queryLost=true;
+ await vm.runInContext("startAction('loader',2)",ctx);await new Promise(r=>setImmediate(r));
  assert.equal(posts.length,2);assert.equal(posts[1].mode,'loader');assert.equal(posts[1].hold_ms,1500);
- assert.equal(vm.runInContext('unresolved',ctx),null); // Recovered lost POST via GET.
- queryLost=true;await vm.runInContext("startAction('maskrom',3)",ctx);
+ assert.equal(nodes.get('boot-maskrom').disabled,false);assert.equal(nodes.get('reset-3').disabled,false);
+ assert.ok(storage.get('esp-reset-action'));
+ await vm.runInContext("startAction('maskrom',3)",ctx);await new Promise(r=>setImmediate(r));
  assert.equal(posts.length,3);assert.equal(posts[2].mode,'maskrom');
- assert.ok(storage.get('esp-reset-action'));assert.equal(nodes.get('boot-maskrom').disabled,true);
- await vm.runInContext('resetChannel(1)',ctx);assert.equal(posts.length,3);
- await vm.runInContext('checkAction()',ctx);assert.equal(posts.length,3);
- queryLost=false;await vm.runInContext('checkAction()',ctx);
- assert.equal(vm.runInContext('unresolved',ctx),null);assert.equal(posts.length,3);
- console.log('Web combinations, GPIO6 selection, lost response GET recovery, unknown-result lock and no replay passed');
+ assert.notEqual(posts[1].request_id,posts[2].request_id);
+ assert.equal(nodes.get('boot-loader').disabled,false);
+ await vm.runInContext('checkAction()',ctx);assert.equal(posts.length,3); // No automatic POST retry.
+ console.log('Historical / timed-out receipts never block new manual actions; no automatic replay passed');
 }
 run().catch(e=>{console.error(e);process.exitCode=1;});
