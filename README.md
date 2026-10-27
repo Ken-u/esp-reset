@@ -4,25 +4,25 @@
 
 ## 支持的板子
 
-| 板子 | 构建目标 | 默认复位输出 | 板载恢复键 | Flash |
+| 板子 | 构建目标 | 默认三路输出（1 / 2 / 3） | 板载恢复键 | Flash |
 | --- | --- | --- | --- | --- |
-| ESP32-S3 公版 N16R8 / DevKitC 类板 | `esp32s3` | **GPIO4** | BOOT / GPIO0 | 16 MB |
-| ESP32-C3 SuperMini | `esp32c3` | **GPIO20** | BOOT / GPIO9 | 4 MB |
+| ESP32-S3 公版 N16R8 / DevKitC 类板 | `esp32s3` | **GPIO4 / GPIO5 / GPIO6** | BOOT / GPIO0 | 16 MB |
+| ESP32-C3 SuperMini | `esp32c3` | **GPIO3 / GPIO4 / GPIO5** | BOOT / GPIO9 | 4 MB |
 
-GPIO 是芯片编号，以板上丝印为准。**S3 不要照旧 C3 图使用 GPIO20：S3 的 GPIO19/20 是原生 USB。** N16R8 的 8 MB PSRAM 无需使用，本项目不初始化 PSRAM；GPIO26–37 的内存引脚也不会用作复位输出。该功能只需片上 RAM。两种固件不可混刷。
+GPIO 是芯片编号，以板上丝印为准。**C3 已按此板的限制禁用 GPIO20/21 复位输出，旧版 GPIO20 接线必须迁移到 GPIO3/4/5。** **S3 不要照旧 C3 图使用 GPIO20：S3 的 GPIO19/20 是原生 USB。** N16R8 的 8 MB PSRAM 无需使用，本项目不初始化 PSRAM；GPIO26–37 的内存引脚也不会用作复位输出。该功能只需片上 RAM。两种固件不可混刷。
 
 ## 功能
 
 - 首次启动的 WPA2 配网热点；手机/电脑浏览器配网，无需安装 App。
 - Wi-Fi 凭据和独立随机管理密码持久化；联网稳定 30 秒后关闭热点，失联约 60 秒恢复热点。
 - 设备网页：网络/固件/复位状态、目标板复位、Wi-Fi 设置、应用 OTA、控制器重启。
-- 一次约 200 ms 的高电平脉冲，松开后冷却 3 秒；没有保持按下或自动反复复位功能。
-- 管理密码鉴权；API 和 CLI；同一启动内最近 8 个成功 request_id 去重。
+- 一块板支持三路独立复位；每路约 200 ms 高电平脉冲、松开后独立冷却 3 秒，并分别统计次数。没有全路复位或自动反复复位功能。
+- 管理密码鉴权；API 和 CLI；同一启动内每路最近 8 个成功 request_id 独立去重。
 - USB 完整刷写包、独立 OTA 应用镜像；CI 构建 C3 和 S3 两个版本。
 
 ## 硬件先接对
 
-**GPIO 不是干接点，不能直接跨接未知按键。** 用 GPIO4（S3）或 GPIO20（C3）驱动外部高电平有效的 MOSFET / PhotoMOS 开关。
+**GPIO 不是干接点，不能直接跨接未知按键。** 按上表分别用三个 GPIO 驱动三个外部高电平有效的 MOSFET / PhotoMOS 开关。每路需要自己的一套开关及电阻，不能把三个输出直接并在一起。
 
 接地触发的 RESET 按键可以用 2N7002 + 330 Ω + 4.7 kΩ。接线与实体脚位见 [docs/hardware.md](docs/hardware.md) 和 [接线图](docs/reset-wiring.svg)。如果希望通用地模拟两根未知按键线，选双向输出、3.3 V 高电平触发的隔离 PhotoMOS 模块。
 
@@ -54,7 +54,7 @@ python3 flash.py --port /dev/ttyACM0
    Recovery AP: ESP-Reset-XXXXXX
    ```
 
-   也可运行 `python3 -m serial.tools.miniterm /dev/ttyACM0 115200`。日志同时输出到 UART0 和原生 USB Serial/JTAG；S3 板上若有 USB-UART 与 USB/OTG 两个口，两者均可查看启动日志，选择对应串口即可。原生 USB 日志为非阻塞输出，先打开监视器再按 RESET/EN。
+   也可运行 `python3 -m serial.tools.miniterm /dev/ttyACM0 115200`。S3 应用日志同时输出到 UART0 和原生 USB Serial/JTAG；板上若有 USB-UART 与 USB/OTG 两个口，两者均可查看。**C3 应用日志仅走原生 USB Serial/JTAG，避开 GPIO20/21 的 UART 功能。** 先打开对应监视器再按 RESET/EN。
 
 2. 手机/电脑连接 `ESP-Reset-XXXXXX`，密码使用上述随机字符串；即使系统提示无互联网，也保持连接。
 3. 手动打开 **http://192.168.4.1/**（不依赖自动弹出配网页）。同一字符串也是管理密码。
@@ -65,7 +65,7 @@ python3 flash.py --port /dev/ttyACM0
 
 ## 正常使用与恢复
 
-网页“重置目标开发板”会先确认，再执行 200 ms 左右脉冲。成功只表示外部开关已松开，不表示目标系统已经启动完成。
+网页分别提供“复位第 1 / 2 / 3 路”按钮，显示各路 GPIO、状态和次数；确认后只对选中的一路执行 200 ms 左右脉冲。成功只表示外部开关已松开，不表示目标系统已经启动完成。
 
 控制器运行时长按 **BOOT 约 5 秒**，仅清除 Wi-Fi 并恢复热点，管理密码保持不变。上电就按住 BOOT 会进入 ROM 下载模式；这里指正常运行后再长按。
 
@@ -79,7 +79,9 @@ python3 flash.py --port /dev/ttyACM0
 
 ```bash
 python3 tools/esp_reset.py --url http://192.168.1.50 status
-python3 tools/esp_reset.py --url http://192.168.1.50 reset
+python3 tools/esp_reset.py --url http://192.168.1.50 reset --channel 1
+python3 tools/esp_reset.py --url http://192.168.1.50 reset --channel 2
+python3 tools/esp_reset.py --url http://192.168.1.50 reset --channel 3
 python3 tools/esp_reset.py --url http://192.168.1.50 wifi 'MyWiFi'
 python3 tools/esp_reset.py --url http://192.168.1.50 ota esp-reset.bin
 ```
@@ -89,13 +91,15 @@ python3 tools/esp_reset.py --url http://192.168.1.50 ota esp-reset.bin
 | 接口 | 方法 | 内容 |
 | --- | --- | --- |
 | `/` | GET | 设备网页 |
-| `/api/status` | GET | 状态，不含密码 |
-| `/api/reset` | POST JSON | `{"request_id":"一次操作的唯一ID"}` |
+| `/api/status` | GET | `channels` 数组包含三路 GPIO / 冷却 / 次数 / 状态，不含密码 |
+| `/api/reset` | POST JSON | `{"channel":1,"request_id":"一次操作的唯一ID"}` |
 | `/api/wifi` | POST JSON | `{"ssid":"WiFi名","password":"密码"}` |
 | `/api/reboot` | POST JSON | `{}`，重启 ESP |
 | `/api/ota` | POST binary | 同芯片 `esp-reset.bin` |
 
-除 `/` 外均需请求头 `X-Reset-Token: <管理密码>`。JSON 请求需 `Content-Type: application/json`。复位冷却/维护中返回 409；松开后才返回 `{"ok":true,"state":"released"}`。request_id 是同次操作的幂等键，去重只覆盖本次启动中最近 8 个成功请求，不跨重启、不无限缓存。
+除 `/` 外均需请求头 `X-Reset-Token: <管理密码>`。JSON 请求需 `Content-Type: application/json`。复位冷却/维护中返回 409；松开后才返回 `{"ok":true,"state":"released"}`。`channel` **必须明确填写整数 1、2 或 3**，遗漏或非法值返回 400，绝不默认复位某一路。成功回执还包含实际 `channel` 和 `gpio`。request_id 是同次操作的幂等键，去重只覆盖该路本次启动中最近 8 个成功请求，不跨重启、不跨通道、不无限缓存。
+
+从单路 0.1 版升级后请刷新网页并更新 CLI/API 调用；升级保留 Wi-Fi 与管理密码。原有不带 channel 的请求会被拒绝。
 
 ## 从源码构建
 
@@ -109,10 +113,10 @@ idf.py -p /dev/ttyACM0 flash monitor
 python3 tools/package_firmware.py build dist/esp32s3-n16r8
 ```
 
-默认分区为两个 1.875 MiB OTA 槽，两种 Flash 都可容纳；S3 其余 Flash 暂未分配，避免不必要的数据分区。需要改输出脚可在 `idf.py menuconfig → ESP Reset` 配置，代码会拒绝默认板型的 USB、内存、启动绑带及保留串口引脚；仍需核对具体公版板的原理图。
+默认分区为两个 1.875 MiB OTA 槽，两种 Flash 都可容纳；S3 其余 Flash 暂未分配，避免不必要的数据分区。需要改输出脚可在 `idf.py menuconfig → ESP Reset` 分别配置三路，代码会拒绝重复 GPIO、恢复键、默认板型的 USB、内存、启动绑带及保留串口引脚（C3 额外禁止 20/21）；仍需核对具体公版板的原理图。
 
 ```bash
 python3 -m unittest discover -s tests -v
 ```
 
-CI 对两个芯片分别做真实 ESP-IDF 构建，并测试实际 C 模块的启动电平、脉冲、冷却、重复请求、维护互斥和 NVS 凭据处理。**尚未连接用户实物板验证 Wi-Fi、OTA 或目标 RESET 电气效果。**
+CI 对两个芯片分别做真实 ESP-IDF 构建，并测试实际 C 模块的启动电平、脉冲、三路隔离、每路冷却和重复请求、维护互斥和 NVS 凭据处理。**尚未连接用户实物板验证 Wi-Fi、OTA 或目标 RESET 电气效果。**

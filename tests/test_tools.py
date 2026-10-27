@@ -55,6 +55,15 @@ class ToolTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 flasher.flash_command(root, '/dev/test', 460800)
 
+    def test_cli_requires_an_explicit_valid_channel(self):
+        from unittest.mock import patch
+        for flags in ([], ['--channel', '0'], ['--channel', '4']):
+            with self.subTest(flags=flags), contextlib.redirect_stderr(io.StringIO()):
+                with patch.object(cli, 'request') as request, self.assertRaises(SystemExit) as error:
+                    cli.main(['--url', 'http://127.0.0.1', '--token', 'test', 'reset', *flags])
+                self.assertEqual(error.exception.code, 2)
+                request.assert_not_called()
+
     def test_cli_authentication_reset_body_and_no_retry(self):
         calls = []
         class Handler(http.server.BaseHTTPRequestHandler):
@@ -74,13 +83,14 @@ class ToolTests(unittest.TestCase):
         try:
             with contextlib.redirect_stderr(io.StringIO()):
                 result = cli.main(['--url', f'http://127.0.0.1:{server.server_port}',
-                                   '--token', 'example-token', 'reset'])
+                                   '--token', 'example-token', 'reset', '--channel', '3'])
             self.assertEqual(result, 1)
             self.assertEqual(len(calls), 1)
             path, token, body = calls[0]
             self.assertEqual(path, '/api/reset')
             self.assertEqual(token, 'example-token')
             self.assertEqual(len(body['request_id']), 32)
+            self.assertEqual(body['channel'], 3)
         finally:
             server.shutdown()
             server.server_close()

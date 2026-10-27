@@ -19,10 +19,10 @@ void app_main(void)
     ESP_ERROR_CHECK(err);
     ESP_ERROR_CHECK(settings_init());
     reset_settings_t settings = settings_get();
-    printf("\nESP RESET / %s\nReset output: GPIO%d (active high, external switch)\n"
+    printf("\nESP RESET / %s\nReset channels 1/2/3: GPIO%d / GPIO%d / GPIO%d (active high, external switches)\n"
            "Management + recovery AP password: %s\n"
            "Hold BOOT for 5 seconds while running to clear Wi-Fi.\n\n",
-           CONFIG_IDF_TARGET, BOARD_RESET_GPIO, settings.token);
+           CONFIG_IDF_TARGET, board_reset_gpio(1), board_reset_gpio(2), board_reset_gpio(3), settings.token);
     ESP_ERROR_CHECK(network_start());
     ESP_ERROR_CHECK(web_server_start());
     err = esp_ota_mark_app_valid_cancel_rollback();

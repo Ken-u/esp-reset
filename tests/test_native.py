@@ -73,62 +73,91 @@ RESET_HARNESS = r'''
 #include "board_reset.h"
 #include "driver/gpio.h"
 #include "freertos/semphr.h"
-static int configured, level = -1, highs, lows, fail_high, fail_low;
+static int configured, levels[49], highs[49], lows[49], last_high, fail_high, fail_low;
+static int depth, nested_done;
 static int64_t now;
+static int valid_pin(int pin) {
+    return pin == board_reset_gpio(1) || pin == board_reset_gpio(2) || pin == board_reset_gpio(3);
+}
 esp_err_t gpio_set_level(int pin, int value) {
-    assert(pin == BOARD_RESET_GPIO);
-    if (value) { assert(configured); highs++; if (fail_high) return ESP_FAIL; }
-    else { lows++; if (fail_low) return ESP_FAIL; }
-    level = value; return ESP_OK;
+    assert(valid_pin(pin));
+    if (value) { assert(configured); highs[pin]++; last_high=pin; if (fail_high) return ESP_FAIL; }
+    else { lows[pin]++; if (fail_low) return ESP_FAIL; }
+    levels[pin]=value; return ESP_OK;
 }
 esp_err_t gpio_config(const gpio_config_t *c) {
-    assert(level == 0);
-    assert(c->pin_bit_mask == (1ULL << BOARD_RESET_GPIO));
+    uint64_t mask=0;
+    for(int ch=1;ch<=3;ch++) {
+        int pin=board_reset_gpio(ch);mask|=1ULL<<pin;
+        assert(levels[pin]==0 && lows[pin]==1 && highs[pin]==0);
+    }
+    assert(c->pin_bit_mask == mask);
     assert(c->mode == GPIO_MODE_OUTPUT && c->pull_up_en == 0 && c->pull_down_en == 1);
-    configured = 1; return ESP_OK;
+    configured=1;return ESP_OK;
 }
 int64_t esp_timer_get_time(void) { return now; }
 void vTaskDelay(unsigned ticks) {
-    assert(level == 1 && ticks * 10 >= 200 && ticks * 10 <= 220);
-    assert(board_reset_press("concurrent") == ESP_ERR_INVALID_STATE);
-    assert(board_reset_begin_maintenance() == ESP_ERR_INVALID_STATE);
-    now += ticks * 10000;
+    int pin=last_high, channel=0;
+    for(int ch=1;ch<=3;ch++)if(board_reset_gpio(ch)==pin)channel=ch;
+    assert(channel && levels[pin]==1 && ticks*10>=200 && ticks*10<=220);
+    assert(board_reset_press(channel,"concurrent")==ESP_ERR_INVALID_STATE);
+    assert(board_reset_begin_maintenance()==ESP_ERR_INVALID_STATE);
+    assert(board_reset_status(channel).active);
+    if(channel==1 && depth==0 && !nested_done) {
+        nested_done=1;depth++;
+        assert(board_reset_press(2,"nested")==ESP_OK);
+        assert(levels[pin]==1); /* Channel 2 must not release channel 1. */
+        assert(board_reset_status(1).active && !board_reset_status(2).active);
+        depth--;
+    }
+    now+=ticks*10000;
 }
 int main(void) {
 #ifdef EXPECT_INVALID_GPIO
-    assert(board_reset_init() == ESP_ERR_INVALID_ARG);
-    assert(highs == 0 && lows == 0);
+    assert(board_reset_init()==ESP_ERR_INVALID_ARG);
+    for(int pin=0;pin<49;pin++)assert(highs[pin]==0 && lows[pin]==0);
     return 0;
 #endif
-    assert(board_reset_press("first") == ESP_ERR_INVALID_STATE);
-    assert(board_reset_init() == ESP_OK && level == 0 && highs == 0);
-    assert(board_reset_press(NULL) == ESP_ERR_INVALID_ARG);
-    assert(board_reset_press("") == ESP_ERR_INVALID_ARG);
-    assert(board_reset_press("first") == ESP_OK && highs == 1 && level == 0);
-    assert(board_reset_press("first") == ESP_OK && highs == 1); /* no second pulse */
-    assert(board_reset_press("second") == ESP_ERR_INVALID_STATE);
-    now += 2999999;
-    assert(board_reset_press("second") == ESP_ERR_INVALID_STATE);
-    now++;
-    assert(board_reset_press("second") == ESP_OK && highs == 2);
-    now += 3000000;
-    assert(board_reset_begin_maintenance() == ESP_OK);
-    assert(board_reset_press("maintenance") == ESP_ERR_INVALID_STATE);
+    int p1=board_reset_gpio(1),p2=board_reset_gpio(2),p3=board_reset_gpio(3);
+    assert(BOARD_RESET_CHANNEL_COUNT==3);
+    assert(board_reset_gpio(0)==-1 && board_reset_gpio(4)==-1);
+    assert(board_reset_press(1,"first")==ESP_ERR_INVALID_STATE);
+    assert(board_reset_init()==ESP_OK && configured);
+    assert(board_reset_press(0,"bad")==ESP_ERR_INVALID_ARG);
+    assert(board_reset_press(4,"bad")==ESP_ERR_INVALID_ARG);
+    assert(board_reset_press(1,NULL)==ESP_ERR_INVALID_ARG);
+    assert(board_reset_press(1,"")==ESP_ERR_INVALID_ARG);
+    char long_id[66];for(int i=0;i<65;i++)long_id[i]='a';long_id[65]=0;
+    assert(board_reset_press(1,long_id)==ESP_ERR_INVALID_ARG);
+    assert(board_reset_press(1,"shared")==ESP_OK);
+    assert(highs[p1]==1 && highs[p2]==1 && highs[p3]==0);
+    assert(!levels[p1] && !levels[p2] && !levels[p3]);
+    assert(board_reset_press(1,"shared")==ESP_OK && highs[p1]==1);
+    assert(board_reset_press(1,"second")==ESP_ERR_INVALID_STATE);
+    assert(board_reset_press(2,"second")==ESP_ERR_INVALID_STATE);
+    assert(board_reset_press(3,"shared")==ESP_OK && highs[p3]==1); /* dedupe is per-channel */
+    assert(board_reset_status(1).count==1 && board_reset_status(2).count==1 && board_reset_status(3).count==1);
+    now+=3000000;
+    assert(board_reset_press(1,"second")==ESP_OK && highs[p1]==2);
+    assert(board_reset_status(1).cooldown_ms==3000);
+    assert(board_reset_begin_maintenance()==ESP_OK);
+    for(int ch=1;ch<=3;ch++)assert(board_reset_press(ch,"maintenance")==ESP_ERR_INVALID_STATE);
     board_reset_end_maintenance();
-    assert(board_reset_press("third") == ESP_OK && highs == 3);
-    board_reset_status_t status = board_reset_status();
-    assert(status.count == 3 && status.cooldown_ms == 3000 && status.enabled);
-    now += 3000000;
-    fail_high = 1;
-    int before = lows;
-    assert(board_reset_press("error-high") == ESP_FAIL && lows == before + 1 && level == 0);
-    fail_high = 0;
-    now += 3000000;
-    fail_low = 1;
-    assert(board_reset_press("error-low") == ESP_FAIL);
-    assert(board_reset_status().count == 3);
+    assert(board_reset_press(2,"second")==ESP_OK && highs[p2]==2);
+    now+=3000000;
+    fail_high=1;int previous=lows[p1];
+    assert(board_reset_press(1,"high-error")==ESP_FAIL && lows[p1]==previous+1 && levels[p1]==0);
+    fail_high=0;
+    fail_low=1;
+    assert(board_reset_press(3,"low-error")==ESP_FAIL);
+    fail_low=0;now+=3000000;
+    board_reset_end_maintenance();
+    assert(!board_reset_status(3).enabled && board_reset_status(3).count==1);
+    assert(board_reset_press(3,"fault-latched")==ESP_ERR_INVALID_STATE);
+    assert(board_reset_press(2,"healthy")==ESP_OK && highs[p2]==3);
+    assert(board_reset_status(1).count==2 && !board_reset_status(1).active);
     assert(!locked);
-    puts("Reset startup, pulse, cooldown, deduplication and maintenance passed");
+    puts("Three channels: startup, isolation, concurrent pulse, cooldown, dedupe, maintenance and fault isolation passed");
 }
 '''
 SETTINGS_HARNESS = r'''
@@ -205,20 +234,31 @@ class NativeTests(unittest.TestCase):
                             str(ROOT/'main'/module), str(build/'harness.c'), '-o', str(build/'test')], check=True)
             subprocess.run([str(build/'test')], check=True)
 
+    def reset_definitions(self, target, pins):
+        return [f'-DCONFIG_RESET_OUTPUT_GPIO_{i}={pin}' for i, pin in enumerate(pins, 1)] + [
+            f'-DCONFIG_RESET_RECOVERY_GPIO={0 if target == "ESP32S3" else 9}',
+            f'-DCONFIG_IDF_TARGET_{target}=1']
+
     def test_s3_gpio_controller(self):
-        self.compile_and_run('board_reset.c', RESET_HARNESS,
-                             ['-DCONFIG_RESET_OUTPUT_GPIO=4', '-DCONFIG_RESET_RECOVERY_GPIO=0', '-DCONFIG_IDF_TARGET_ESP32S3=1'])
+        self.compile_and_run('board_reset.c', RESET_HARNESS, self.reset_definitions('ESP32S3', (4, 5, 6)))
 
     def test_c3_gpio_controller(self):
-        self.compile_and_run('board_reset.c', RESET_HARNESS,
-                             ['-DCONFIG_RESET_OUTPUT_GPIO=20', '-DCONFIG_RESET_RECOVERY_GPIO=9', '-DCONFIG_IDF_TARGET_ESP32C3=1'])
+        self.compile_and_run('board_reset.c', RESET_HARNESS, self.reset_definitions('ESP32C3', (3, 4, 5)))
 
-    def test_s3_rejects_memory_and_usb_pins(self):
-        for pin in (19, 20, 35, 36, 37, 43, 45):
+    def test_s3_rejects_memory_usb_and_duplicate_pins(self):
+        for pin in (19, 20, 35, 36, 37, 43, 45, 5):
             with self.subTest(pin=pin):
                 self.compile_and_run('board_reset.c', RESET_HARNESS,
-                    [f'-DCONFIG_RESET_OUTPUT_GPIO={pin}', '-DCONFIG_RESET_RECOVERY_GPIO=0',
-                     '-DCONFIG_IDF_TARGET_ESP32S3=1', '-DEXPECT_INVALID_GPIO=1'])
+                    self.reset_definitions('ESP32S3', (pin, 5, 6)) + ['-DEXPECT_INVALID_GPIO=1'])
+
+    def test_c3_rejects_20_21_on_every_channel(self):
+        for pin in (20, 21):
+            for index in range(3):
+                pins = [3, 4, 5]
+                pins[index] = pin
+                with self.subTest(pin=pin, channel=index+1):
+                    self.compile_and_run('board_reset.c', RESET_HARNESS,
+                        self.reset_definitions('ESP32C3', pins) + ['-DEXPECT_INVALID_GPIO=1'])
 
     def test_wifi_settings(self):
         self.compile_and_run('settings.c', SETTINGS_HARNESS)
