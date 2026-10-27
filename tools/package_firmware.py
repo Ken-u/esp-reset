@@ -22,10 +22,10 @@ def package(build: Path, destination: Path) -> None:
     shutil.copy2(build / 'flasher_args.json', firmware / 'flasher_args.json')
     scripts = destination / 'tools'
     scripts.mkdir(exist_ok=True)
-    for name in ('flash.py', 'device.py', 'esp_reset.py'):
+    for name in ('flash.py', 'device.py', 'esp_reset.py', 'network.py'):
         shutil.copy2(Path(__file__).with_name(name), scripts / name)
     shutil.copy2(Path(__file__).with_name('run.sh'), destination / 'run.sh')
-    for name in ('setup', 'flash', 'monitor', 'wifi', 'status', 'reset', 'loader', 'maskrom'):
+    for name in ('setup', 'flash', 'monitor', 'wifi', 'status', 'reset', 'loader', 'maskrom', 'result'):
         wrapper = destination / (name + '.sh')
         wrapper.write_text('#!/bin/sh\nset -eu\nbase_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)\nexec sh "$base_dir/run.sh" ' + name + ' "$@"\n')
         wrapper.chmod(0o755)
@@ -37,28 +37,32 @@ def package(build: Path, destination: Path) -> None:
     chip = config['extra_esptool_args']['chip']
     (destination / 'README.txt').write_text(
         f'ESP Reset / {chip} — macOS / Linux\n\n'
-        '接 ESP 原生 USB/OTG 口（不是 USB-UART 桥接串口）。退出其他串口程序。\n'
-        'sh setup.sh                 安装 uv/Python 依赖 → 刷写 → USB 配网 → 串口监视\n'
-        'sh flash.sh                 只刷写，默认 115200；--no-stub 可绕过 stub\n'
-        'sh wifi.sh                  USB 配网，隐藏输入 Wi-Fi 密码，打印后台地址\n'
-        'sh monitor.sh               串口监视，自动重连，并主动查询密码/地址\n'
-        'sh status.sh                查询后台地址和密码\n'
-        'sh reset.sh --channel 1     单路复位，通道 1/2/3 可选\n'
-        'sh loader.sh                通道 2 按住 RECOVERY → 通道 1 RESET → 松开\n'
-        'sh maskrom.sh               通道 3 按住 MASKROM → 通道 1 RESET → 松开\n'
-        '所有脚本支持 --port /dev/cu.usbmodemXXX 或 --port /dev/ttyACM0\n'
-        '自动选择唯一 ESP 原生 USB，多设备必须指定端口。RESET 后自动重连同一设备。\n'
-        '后台密码固定 esp32reset；自动 AP 已关闭；联网失败可随时 USB 重新配网。\n'
-        'S3 通道 1/2/3: GPIO4/5/6；C3: GPIO3/4/5（禁用20/21）。\n'
-        'loader/maskrom 仅在同一目标板接好 RESET/RECOVERY/MASKROM 三个独立开关后使用。\n'
-        '三路各接不同板的 RESET 时，只用 reset.sh --channel N。\n'
-        'GPIO 通过独立 MOSFET/PhotoMOS 模拟按键，不能直接跨接未知信号。\n'
-        '默认启动键在 RESET 前按住100ms，RESET 200ms，松开 RESET 后再保持1500ms。\n'
-        'loader/maskrom 支持 --hold-ms 100..10000；不保证板级启动模式，需目标板验证。\n'
-        'Maskrom 必须接板上专用按键/安全控制接口，勿把 eMMC 时钟直接接到 ESP GPIO。\n'
-        '固件在 firmware/，内部脚本在 tools/。OTA 仅上传 firmware/esp-reset.bin。\n'
-        '刷写不清除 Wi-Fi；旧随机管理密码升级后替换为 esp32reset。\n'
-        '依赖固定 esptool 5.6.0、pyserial 3.5；uv 自动准备 Python 3.12，无需编译环境。\n')
+        '日常控制通过 Wi-Fi + HTTP，无需 USB 接电脑。ESP 与目标板按接线图连接。\n'
+        '后台密码固定 esp32reset；AP 关闭；网页支持三路独立复位及 Loader/Maskrom 组合。\n\n'
+        '网络控制（--url 可省略 http://；也可设置 ESP_RESET_URL）：\n'
+        'sh status.sh --url http://192.168.1.50\n'
+        'sh reset.sh --url http://192.168.1.50 --channel 3\n'
+        'sh loader.sh --url http://192.168.1.50\n'
+        'sh maskrom.sh --url http://192.168.1.50 --hold-ms 1500\n'
+        'sh result.sh               只查询上一次操作，不发新按键请求\n'
+        'sh result.sh --clear-unknown  手工确认目标状态后解锁未知结果，不按键\n'
+        '请求带唯一编号，超时只查结果；未确认时再次运行先查询旧请求。\n'
+        '网络脚本只需 uv/Python，不安装串口或烧录依赖。\n\n'
+        '首次刷机/可选 USB 配网：连接 ESP 原生 USB/OTG 口，退出其他串口程序。\n'
+        'sh setup.sh    uv准备环境 → 刷写 → USB配网 → 显示后台地址 → 看串口\n'
+        'sh flash.sh    只刷写，默认115200，支持 --no-stub / --baud\n'
+        'sh wifi.sh     USB配网，隐藏输入Wi-Fi密码，联网后保存地址到device.json\n'
+        'sh monitor.sh  USB串口监视并自动重连\n'
+        'sh run.sh usb-status  USB查询；USB入口可用 --port 指定端口\n'
+        '首次联网后可以断开电脑USB；ESP保留Wi-Fi配置，使用自己的供电。\n'
+        '刷写和USB脚本用uv准备Python3.12/esptool5.6.0/pyserial3.5，无需编译环境。\n\n'
+        'S3通道1/2/3=GPIO4/5/6；C3=GPIO3/4/5，禁用20/21。\n'
+        '组合模式：同一目标板，通道1接RESET、2接RECOVERY、3接专用MASKROM。\n'
+        '先按模式键100ms，再RESET200ms，松RESET后再保持模式键1500ms，最后松模式键。\n'
+        '三路接不同板RESET时，只使用单路reset；组合操作的实际模式需目标板验证。\n'
+        '每路通过独立MOSFET/PhotoMOS模拟按键，不可直接跨接未知信号或eMMC时钟。\n'
+        '固件/OTA应用在firmware/，内部工具在tools/，接线图在docs/。\n'
+        '诊断：网页显示操作编号、GPIO拉高次数/时间及ESP启动编号；可区分回执丢失和重复执行。\n')
     manifest = []
     for path in sorted(destination.rglob('*')):
         if path.is_file() and path.name != 'SHA256SUMS':

@@ -12,7 +12,9 @@ static const int s_gpios[BOARD_RESET_CHANNEL_COUNT] = {
 };
 typedef struct {
     int64_t next_allowed_us;
-    uint32_t count;
+    uint32_t count, pulse_count;
+    char last_request_id[BOARD_RESET_REQUEST_MAX + 1];
+    int64_t pressed_us, released_us;
     bool active;
     bool fault;
     char recent[8][BOARD_RESET_REQUEST_MAX + 1];
@@ -82,17 +84,23 @@ esp_err_t board_reset_press(int channel, const char *id)
         return ESP_ERR_INVALID_STATE;
     }
     state->active = true;
+    strcpy(state->last_request_id, id);
     xSemaphoreGive(s_lock);
 
     /* No lock is held across the local pulse: other channels stay independent,
        while maintenance sees active=true and cannot start. */
     esp_err_t err = gpio_set_level(pin, 1);
+    int64_t pressed_us = err == ESP_OK ? esp_timer_get_time() : 0;
+    bool pressed = err == ESP_OK;
     if (err == ESP_OK) vTaskDelay(pdMS_TO_TICKS(BOARD_RESET_PULSE_MS) + 1);
     esp_err_t release_err = gpio_set_level(pin, 0);
+    int64_t released_us = esp_timer_get_time();
 
     xSemaphoreTake(s_lock, portMAX_DELAY);
     state->next_allowed_us = esp_timer_get_time() + BOARD_RESET_COOLDOWN_MS * 1000LL;
     state->active = false;
+    state->pressed_us = pressed_us; state->released_us = released_us;
+    if (pressed) ++state->pulse_count;
     if (release_err != ESP_OK) {
         state->fault = true;
         err = release_err;
@@ -113,6 +121,9 @@ board_reset_status_t board_reset_status(int channel)
     int64_t remaining = state->next_allowed_us - esp_timer_get_time();
     out.cooldown_ms = remaining > 0 ? (uint32_t)((remaining + 999) / 1000) : 0;
     out.count = state->count;
+    out.pulse_count = state->pulse_count;
+    strcpy(out.last_request_id, state->last_request_id);
+    out.pressed_us = state->pressed_us; out.released_us = state->released_us;
     out.active = state->active;
     out.enabled = s_enabled && !state->fault;
     xSemaphoreGive(s_lock);
@@ -160,18 +171,30 @@ esp_err_t board_reset_boot(int strap, const char *id, unsigned hold_ms)
     if (busy) { xSemaphoreGive(s_lock); return ESP_ERR_INVALID_STATE; }
     s_enabled = false;
     s_channels[0].active = s_channels[strap - 1].active = true;
+    strcpy(s_channels[0].last_request_id, id);
+    strcpy(s_channels[strap - 1].last_request_id, id);
     xSemaphoreGive(s_lock);
     esp_err_t err = gpio_set_level(s_gpios[strap - 1], 1);
+    bool strap_pressed = err == ESP_OK, reset_pressed = false;
+    int64_t strap_start = strap_pressed ? esp_timer_get_time() : 0, reset_start = 0;
     if (err == ESP_OK) {
         vTaskDelay(pdMS_TO_TICKS(100));
         err = gpio_set_level(s_gpios[0], 1);
+        reset_pressed = err == ESP_OK;
+        reset_start = reset_pressed ? esp_timer_get_time() : 0;
         if (err == ESP_OK) vTaskDelay(pdMS_TO_TICKS(BOARD_RESET_PULSE_MS));
     }
     esp_err_t reset_release = gpio_set_level(s_gpios[0], 0);
+    int64_t reset_end = esp_timer_get_time();
     if (err == ESP_OK && reset_release == ESP_OK) vTaskDelay(pdMS_TO_TICKS(hold_ms));
     esp_err_t strap_release = gpio_set_level(s_gpios[strap - 1], 0);
+    int64_t strap_end = esp_timer_get_time();
     xSemaphoreTake(s_lock, portMAX_DELAY);
     s_channels[0].active = s_channels[strap - 1].active = false;
+    if (reset_pressed) ++s_channels[0].pulse_count;
+    if (strap_pressed) ++s_channels[strap - 1].pulse_count;
+    s_channels[0].pressed_us = reset_start; s_channels[0].released_us = reset_end;
+    s_channels[strap - 1].pressed_us = strap_start; s_channels[strap - 1].released_us = strap_end;
     s_channels[0].fault |= reset_release != ESP_OK;
     s_channels[strap - 1].fault |= strap_release != ESP_OK;
     if (reset_release != ESP_OK) err = reset_release;

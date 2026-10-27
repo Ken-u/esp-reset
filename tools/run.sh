@@ -1,5 +1,6 @@
 #!/bin/sh
 set -eu
+echo "准备运行环境（首次可能需要下载 uv / Python）…"
 bundle_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 if command -v uv >/dev/null 2>&1; then
     uv_bin=$(command -v uv)
@@ -14,4 +15,11 @@ else
 fi
 device_script="$bundle_dir/device.py"
 if [ -f "$bundle_dir/tools/device.py" ]; then device_script="$bundle_dir/tools/device.py"; fi
-exec "$uv_bin" run --no-project --python 3.12 --with esptool==5.6.0 --with pyserial==3.5 "$device_script" "$@"
+case "${1:-setup}" in
+    reset|loader|maskrom|status|result)
+        network_script="$bundle_dir/network.py"
+        if [ -f "$bundle_dir/tools/network.py" ]; then network_script="$bundle_dir/tools/network.py"; fi
+        exec "$uv_bin" run --no-project --python 3.12 "$network_script" "$@"
+        ;;
+esac
+exec "$uv_bin" run --no-project --python 3.12 --with esptool==5.6.0 --with pyserial==3.5 python -u "$device_script" "$@"

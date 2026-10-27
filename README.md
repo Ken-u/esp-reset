@@ -57,12 +57,19 @@ sh setup.sh --port /dev/cu.usbmodem5A450470201
 | `sh flash.sh` | 仅刷写，打印密码及设备状态 |
 | `sh wifi.sh` | 单独 USB 配网，联网后打印网页地址 |
 | `sh monitor.sh` | 看串口，RESET 后自动重连 |
-| `sh status.sh` | 随时查询密码和网页地址 |
-| `sh reset.sh --channel 1` | 复位通道 1，支持 1/2/3，默认 1 |
-| `sh loader.sh` | RECOVERY + RESET 组合 |
-| `sh maskrom.sh` | MASKROM + RESET 组合 |
+| `sh status.sh --url http://ESP的IP` | HTTP 查询状态，无需串口 |
+| `sh reset.sh --url http://ESP的IP --channel 1` | HTTP 单路复位，支持 1/2/3 |
+| `sh loader.sh --url http://ESP的IP` | HTTP RECOVERY + RESET |
+| `sh maskrom.sh --url http://ESP的IP` | HTTP MASKROM + RESET |
+| `sh result.sh` | 只查询上一次操作，不按键 |
 
-所有入口都支持 `--port`。`sh run.sh ports` 列举串口。AP 已关闭，未配网/联网失败时直接 USB 重新配网即可，不需要连接热点。
+**日常控制通过 IP + HTTP，不需要把 ESP 接到电脑。** ESP 和目标板按接线图连接并共地（使用隔离开关时按模块要求）。USB 只用于刷机和可选的首次配网。网络命令接受 `--url` 或 `ESP_RESET_URL`；USB 配网成功后也会把地址保存在包目录 `device.json`，后续可省略地址。刷写/USB入口支持 `--port`；`sh run.sh ports` 列串口，`sh run.sh usb-status` 通过USB查状态。
+
+### 网页组合与操作回执
+
+网页新增 Loader / Maskrom 按钮，调用与脚本相同的动作服务。`POST /api/action` 提交 `{boot_id,request_id,mode,channel,hold_ms}`，返回202后由独立任务执行；`GET /api/action?id=...` 查询 queued/running/released/failed，查询不会触发GPIO。`/api/status` 提供本次启动唯一 `boot_id` 及每路 `pulse_count`、`last_request_id`、`pressed_us`、`released_us`，这些是固件GPIO驱动调用记录，不是对外部电压的测量。
+
+网页在请求发出前保存编号；超时后只查询同一编号，刷新页面也保留未确认操作锁。网络脚本把编号保存在 `last-action.json`；未确认时再次运行先查旧请求，不发新请求。同一包同时只能运行一个控制脚本。未知结果不会自动解锁，需确认目标状态后在网页手动解锁，或运行 `sh result.sh --clear-unknown`。ESP重启后不重放旧动作；每次启动保存最近16个动作回执，不跨重启。这里不宣称已经定位GPIO6导致目标板两次重启的电气/启动原因，需要结合新的执行记录或逻辑分析仪确认。
 
 ### Loader / Maskrom 接线
 

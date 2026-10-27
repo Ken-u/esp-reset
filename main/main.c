@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include "board_reset.h"
+#include "actions.h"
 #include "network.h"
 #include "settings.h"
 #include "web_server.h"
@@ -25,6 +26,7 @@ void app_main(void)
            "Hold BOOT for 5 seconds while running to clear Wi-Fi.\n\n",
            CONFIG_IDF_TARGET, board_reset_gpio(1), board_reset_gpio(2), board_reset_gpio(3), settings.token);
     ESP_ERROR_CHECK(network_start());
+    ESP_ERROR_CHECK(actions_start());
     ESP_ERROR_CHECK(web_server_start());
     ESP_ERROR_CHECK(usb_console_start());
     err = esp_ota_mark_app_valid_cancel_rollback();

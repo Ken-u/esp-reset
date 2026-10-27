@@ -1,5 +1,6 @@
 #include "web_server.h"
 #include "board_reset.h"
+#include "actions.h"
 #include "network.h"
 #include "settings.h"
 #include <stdio.h>
@@ -102,6 +103,7 @@ static esp_err_t status_get(httpd_req_t *req)
     cJSON *out = cJSON_CreateObject();
     if (!out) return ESP_ERR_NO_MEM;
     cJSON_AddBoolToObject(out, "ok", true);
+    cJSON_AddStringToObject(out, "boot_id", actions_boot_id());
     cJSON_AddStringToObject(out, "target", CONFIG_IDF_TARGET);
     cJSON_AddStringToObject(out, "version", esp_app_get_description()->version);
     cJSON_AddNumberToObject(out, "pulse_ms", BOARD_RESET_PULSE_MS);
@@ -117,6 +119,10 @@ static esp_err_t status_get(httpd_req_t *req)
         cJSON_AddNumberToObject(item, "gpio", board_reset_gpio(channel));
         cJSON_AddNumberToObject(item, "cooldown_ms", reset.cooldown_ms);
         cJSON_AddNumberToObject(item, "reset_count", reset.count);
+        cJSON_AddNumberToObject(item, "pulse_count", reset.pulse_count);
+        cJSON_AddStringToObject(item, "last_request_id", reset.last_request_id);
+        cJSON_AddNumberToObject(item, "pressed_us", reset.pressed_us);
+        cJSON_AddNumberToObject(item, "released_us", reset.released_us);
         cJSON_AddBoolToObject(item, "enabled", reset.enabled);
         cJSON_AddBoolToObject(item, "active", reset.active);
         cJSON_AddItemToArray(channels, item);
@@ -167,6 +173,82 @@ static esp_err_t reset_post(httpd_req_t *req)
     cJSON_AddNumberToObject(out, "pulse_ms", BOARD_RESET_PULSE_MS);
     cJSON_Delete(body);
     return json_reply(req, "200 OK", out);
+}
+
+static cJSON *action_json(const reset_action_t *a)
+{
+    cJSON *out = cJSON_CreateObject();
+    if (!out) return NULL;
+    cJSON_AddBoolToObject(out, "ok", true);
+    cJSON_AddStringToObject(out, "boot_id", actions_boot_id());
+    cJSON_AddStringToObject(out, "request_id", a->id);
+    cJSON_AddStringToObject(out, "mode", a->mode);
+    cJSON_AddNumberToObject(out, "channel", a->channel);
+    cJSON_AddStringToObject(out, "state", a->state);
+    cJSON_AddStringToObject(out, "result", esp_err_to_name(a->result));
+    cJSON_AddNumberToObject(out, "started_us", a->started_us);
+    cJSON_AddNumberToObject(out, "finished_us", a->finished_us);
+    cJSON *pins = cJSON_AddArrayToObject(out, "pins");
+    for (int ch = 1; ch <= BOARD_RESET_CHANNEL_COUNT; ++ch) {
+        if (ch != a->channel && !(strcmp(a->mode, "reset") != 0 && ch == 1)) continue;
+        board_reset_status_t trace = a->pin_traces[ch - 1];
+        cJSON *pin = cJSON_CreateObject();
+        if (!pin || !pins) { cJSON_Delete(pin); cJSON_Delete(out); return NULL; }
+        cJSON_AddNumberToObject(pin, "channel", ch);
+        cJSON_AddNumberToObject(pin, "gpio", board_reset_gpio(ch));
+        cJSON_AddNumberToObject(pin, "pulse_count", trace.pulse_count);
+        cJSON_AddStringToObject(pin, "last_request_id", trace.last_request_id);
+        cJSON_AddNumberToObject(pin, "pressed_us", trace.pressed_us);
+        cJSON_AddNumberToObject(pin, "released_us", trace.released_us);
+        cJSON_AddItemToArray(pins, pin);
+    }
+    return out;
+}
+
+static esp_err_t action_get(httpd_req_t *req)
+{
+    if (!authorize(req)) return ESP_FAIL;
+    char query[128], id[65];
+    if (httpd_req_get_url_query_str(req, query, sizeof query) != ESP_OK ||
+        httpd_query_key_value(query, "id", id, sizeof id) != ESP_OK)
+        return error_reply(req, "400 Bad Request", "id required");
+    reset_action_t action;
+    if (!actions_get(id, &action)) return error_reply(req, "404 Not Found", "Action not found in this boot");
+    cJSON *out = action_json(&action);
+    return out ? json_reply(req, "200 OK", out) : ESP_ERR_NO_MEM;
+}
+
+static esp_err_t action_post(httpd_req_t *req)
+{
+    if (!authorize(req)) return ESP_FAIL;
+    cJSON *body = read_json(req);
+    if (!body) return ESP_FAIL;
+    const cJSON *id = cJSON_GetObjectItemCaseSensitive(body, "request_id");
+    const cJSON *boot = cJSON_GetObjectItemCaseSensitive(body, "boot_id");
+    const cJSON *mode = cJSON_GetObjectItemCaseSensitive(body, "mode");
+    const cJSON *ch = cJSON_GetObjectItemCaseSensitive(body, "channel");
+    const cJSON *hold = cJSON_GetObjectItemCaseSensitive(body, "hold_ms");
+    int channel = 0; unsigned hold_ms = 1500;
+    bool valid = cJSON_IsString(id) && cJSON_IsString(boot) && cJSON_IsString(mode);
+    if (valid && strcmp(mode->valuestring, "reset") == 0) {
+        valid = cJSON_IsNumber(ch) && ch->valuedouble >= 1 && ch->valuedouble <= 3 &&
+                ch->valuedouble == ch->valueint;
+        if (valid) channel = ch->valueint;
+    }
+    if (hold) {
+        bool good_hold = cJSON_IsNumber(hold) && hold->valuedouble >= 100 && hold->valuedouble <= 10000 &&
+                         hold->valuedouble == hold->valueint;
+        valid &= good_hold;
+        if (good_hold) hold_ms = hold->valueint;
+    }
+    reset_action_t action;
+    esp_err_t err = valid ? actions_submit(boot->valuestring, id->valuestring, mode->valuestring,
+                                           channel, hold_ms, &action) : ESP_ERR_INVALID_ARG;
+    cJSON_Delete(body);
+    if (err != ESP_OK) return error_reply(req, err == ESP_ERR_INVALID_STATE ? "409 Conflict" : "400 Bad Request",
+                                         esp_err_to_name(err));
+    cJSON *out = action_json(&action);
+    return out ? json_reply(req, "202 Accepted", out) : ESP_ERR_NO_MEM;
 }
 
 static esp_err_t wifi_post(httpd_req_t *req)
@@ -266,7 +348,7 @@ esp_err_t web_server_start(void)
 {
     httpd_config_t config = HTTPD_DEFAULT_CONFIG();
     config.stack_size = 8192;
-    config.max_uri_handlers = 8;
+    config.max_uri_handlers = 10;
     config.lru_purge_enable = true;
     config.recv_wait_timeout = 10;
     httpd_handle_t server;
@@ -275,6 +357,8 @@ esp_err_t web_server_start(void)
     const httpd_uri_t routes[] = {
         {.uri="/", .method=HTTP_GET, .handler=root_get},
         {.uri="/api/status", .method=HTTP_GET, .handler=status_get},
+        {.uri="/api/action", .method=HTTP_GET, .handler=action_get},
+        {.uri="/api/action", .method=HTTP_POST, .handler=action_post},
         {.uri="/api/reset", .method=HTTP_POST, .handler=reset_post},
         {.uri="/api/wifi", .method=HTTP_POST, .handler=wifi_post},
         {.uri="/api/reboot", .method=HTTP_POST, .handler=reboot_post},

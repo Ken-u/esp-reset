@@ -11,6 +11,9 @@
 
 typedef struct {
     uint32_t count;
+    uint32_t pulse_count;
+    char last_request_id[BOARD_RESET_REQUEST_MAX + 1];
+    int64_t pressed_us, released_us;
     uint32_t cooldown_ms;
     bool enabled;
     bool active;

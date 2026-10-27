@@ -119,7 +119,11 @@ class USB:
 def show_status(value):
     print(f'后台密码：{value.get("password", PASSWORD)}')
     if value.get('connected') and value.get('ip'):
-        print(f'后台网页：http://{value["ip"]}/')
+        url = f'http://{value["ip"]}'
+        print(f'后台网页：{url}/')
+        config = Path(__file__).resolve().parent.parent / 'device.json'
+        config.write_text(json.dumps({'url': url}) + '\n')
+        print(f'网络控制：sh reset.sh --url {url} --channel 1')
     else:
         print('Wi-Fi 尚未连接。运行 sh wifi.sh 通过 USB 配网。')
 
@@ -145,7 +149,7 @@ def monitor(usb):
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command', nargs='?', default='setup',
-                        choices=['setup', 'flash', 'monitor', 'wifi', 'status', 'reset', 'loader', 'maskrom', 'ports'])
+                        choices=['setup', 'flash', 'monitor', 'wifi', 'status', 'reset', 'loader', 'maskrom', 'ports', 'usb-status'])
     parser.add_argument('--port')
     parser.add_argument('--baud', type=int, default=115200)
     parser.add_argument('--no-stub', action='store_true')
@@ -196,7 +200,7 @@ def main(argv=None):
                 return 0
         if args.command in ('setup', 'monitor'):
             monitor(usb)
-        elif args.command == 'status':
+        elif args.command in ('status', 'usb-status'):
             show_status(usb.request('status'))
         elif args.command in ('reset', 'loader', 'maskrom'):
             payload = {'channel': args.channel} if args.command == 'reset' else {'hold_ms': args.hold_ms}
