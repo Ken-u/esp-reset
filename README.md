@@ -54,7 +54,7 @@ python3 flash.py --port /dev/ttyACM0
    Recovery AP: ESP-Reset-XXXXXX
    ```
 
-   也可运行 `python3 -m serial.tools.miniterm /dev/ttyACM0 115200`。S3 若有两个 USB 口，默认日志走支持原生 USB Serial/JTAG 的 USB/OTG 口；USB-UART 口仍可用于 esptool 烧录。
+   也可运行 `python3 -m serial.tools.miniterm /dev/ttyACM0 115200`。日志同时输出到 UART0 和原生 USB Serial/JTAG；S3 板上若有 USB-UART 与 USB/OTG 两个口，两者均可查看启动日志，选择对应串口即可。原生 USB 日志为非阻塞输出，先打开监视器再按 RESET/EN。
 
 2. 手机/电脑连接 `ESP-Reset-XXXXXX`，密码使用上述随机字符串；即使系统提示无互联网，也保持连接。
 3. 手动打开 **http://192.168.4.1/**（不依赖自动弹出配网页）。同一字符串也是管理密码。
