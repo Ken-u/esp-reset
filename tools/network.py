@@ -38,6 +38,13 @@ def save_terminal(action_id, state):
             path.write_text(json.dumps(saved, ensure_ascii=False, indent=2) + '\n')
 
 
+def controller_restarted(action_id):
+    # Close the local pending record without pretending the old pulse failed.
+    # The current invocation stops here; a later explicit invocation is a new action.
+    save_terminal(action_id, 'unknown_after_restart')
+    raise ValueError('ESP 已重启，旧操作结果未知，已解除旧操作锁。本次未重发；确认目标状态后，再次手动执行即可。')
+
+
 def run_action(url, mode, channel, hold_ms):
     receipt_file = CONFIG.with_name('last-action.json')
     if receipt_file.exists():
@@ -73,8 +80,10 @@ def wait_action(url, action_id, boot):
     while time.monotonic() < deadline:
         try:
             value = request(url, '/api/action?id=' + action_id)
-            if value.get('boot_id') != boot:
-                raise ValueError('ESP 已重启，旧操作结果未知；不会重发。')
+            if not value.get('boot_id'):
+                raise ValueError('设备未返回启动编号，保留未确认操作，不会重发。')
+            if value['boot_id'] != boot:
+                controller_restarted(action_id)
             state = value.get('state')
             if state == 'released':
                 save_terminal(action_id, 'released')
@@ -88,8 +97,10 @@ def wait_action(url, action_id, boot):
             # A new boot / missing receipt cannot prove the previous pulse failed.
             if exc.code == 404:
                 state = request(url, '/api/status')
-                if state.get('boot_id') != boot:
-                    raise ValueError('ESP 已重启，旧操作结果未知；不会重发。') from exc
+                if not state.get('boot_id'):
+                    raise ValueError('设备未返回启动编号，保留未确认操作，不会重发。') from exc
+                if state['boot_id'] != boot:
+                    controller_restarted(action_id)
         except OSError as exc:
             last_error = str(exc)
         time.sleep(0.3)

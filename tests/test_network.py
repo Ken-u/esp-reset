@@ -48,6 +48,30 @@ class NetworkTests(unittest.TestCase):
                 wait.assert_called_once_with('http://esp','old','boot-one')
                 request.assert_not_called()
 
+    def test_restart_closes_pending_but_never_sends_until_next_invocation(self):
+        for missing in (False, True):
+            with self.subTest(missing_receipt=missing), tempfile.TemporaryDirectory() as directory, patch.object(network, 'CONFIG', Path(directory)/'device.json'):
+                receipt = Path(directory)/'last-action.json'
+                receipt.write_text(json.dumps({'url':'http://esp','state':'pending','request_id':'old','boot_id':'old-boot'}))
+                posts = []
+                def request(url, path, payload=None):
+                    if payload is not None:
+                        posts.append(payload)
+                        return {'ok':True,'boot_id':'new-boot','state':'queued'}
+                    if path == '/api/status':
+                        return {'ok':True,'boot_id':'new-boot'}
+                    if path.endswith('id=old') and missing:
+                        raise network.urllib.error.HTTPError(url,404,'missing',{},None)
+                    return {'ok':True,'boot_id':'new-boot','state':'released'}
+                with patch.object(network, 'request', side_effect=request), contextlib.redirect_stdout(io.StringIO()):
+                    with self.assertRaisesRegex(ValueError, '已解除旧操作锁'):
+                        network.run_action('http://esp','reset',3,1500)
+                    self.assertEqual(posts, [])
+                    self.assertEqual(json.loads(receipt.read_text())['state'], 'unknown_after_restart')
+                    self.assertEqual(network.run_action('http://esp','reset',3,1500), 0)
+                    self.assertEqual(len(posts), 1)
+                    self.assertEqual(posts[0]['boot_id'], 'new-boot')
+
     def test_network_wrapper_does_not_require_serial_or_esptool(self):
         source=(Path(__file__).resolve().parents[1]/'tools/run.sh').read_text()
         branch=source.split('reset|loader|maskrom|status|result)')[1].split(';;')[0]

@@ -69,7 +69,7 @@ sh setup.sh --port /dev/cu.usbmodem5A450470201
 
 网页新增 Loader / Maskrom 按钮，调用与脚本相同的动作服务。`POST /api/action` 提交 `{boot_id,request_id,mode,channel,hold_ms}`，返回202后由独立任务执行；`GET /api/action?id=...` 查询 queued/running/released/failed，查询不会触发GPIO。`/api/status` 提供本次启动唯一 `boot_id` 及每路 `pulse_count`、`last_request_id`、`pressed_us`、`released_us`，这些是固件GPIO驱动调用记录，不是对外部电压的测量。
 
-网页在请求发出前保存编号；超时后只查询同一编号，刷新页面也保留未确认操作锁。网络脚本把编号保存在 `last-action.json`；未确认时再次运行先查旧请求，不发新请求。同一包同时只能运行一个控制脚本。未知结果不会自动解锁，需确认目标状态后在网页手动解锁，或运行 `sh result.sh --clear-unknown`。ESP重启后不重放旧动作；每次启动保存最近16个动作回执，不跨重启。这里不宣称已经定位GPIO6导致目标板两次重启的电气/启动原因，需要结合新的执行记录或逻辑分析仪确认。
+网页在请求发出前保存编号；超时后只查询同一编号，刷新页面也保留未确认操作锁。网络脚本把编号保存在 `last-action.json`；未确认时再次运行先查旧请求，不发新请求。同一包同时只能运行一个控制脚本。未知结果不会自动解锁，需确认目标状态后在网页手动解锁，或运行 `sh result.sh --clear-unknown`。检测到ESP启动编号变化时，脚本将旧操作标记为 unknown_after_restart 并解除旧操作锁，本次不触发按键；下一次显式运行才创建新操作。网络仍断开或同一次启动结果未知时继续保留锁。ESP重启后不重放旧动作；每次启动保存最近16个动作回执，不跨重启。这里不宣称已经定位GPIO6导致目标板两次重启的电气/启动原因，需要结合新的执行记录或逻辑分析仪确认。
 
 ### Loader / Maskrom 接线
 
