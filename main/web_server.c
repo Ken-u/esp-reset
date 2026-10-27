@@ -99,17 +99,30 @@ static esp_err_t status_get(httpd_req_t *req)
     if (!authorize(req)) return ESP_FAIL;
     reset_settings_t settings = settings_get();
     reset_network_status_t net = network_status();
-    board_reset_status_t reset = board_reset_status();
     cJSON *out = cJSON_CreateObject();
     if (!out) return ESP_ERR_NO_MEM;
     cJSON_AddBoolToObject(out, "ok", true);
     cJSON_AddStringToObject(out, "target", CONFIG_IDF_TARGET);
     cJSON_AddStringToObject(out, "version", esp_app_get_description()->version);
-    cJSON_AddNumberToObject(out, "gpio", BOARD_RESET_GPIO);
     cJSON_AddNumberToObject(out, "pulse_ms", BOARD_RESET_PULSE_MS);
-    cJSON_AddNumberToObject(out, "cooldown_ms", reset.cooldown_ms);
-    cJSON_AddNumberToObject(out, "reset_count", reset.count);
-    cJSON_AddBoolToObject(out, "reset_enabled", reset.enabled);
+    cJSON_AddNumberToObject(out, "channel_count", BOARD_RESET_CHANNEL_COUNT);
+    cJSON *channels = cJSON_AddArrayToObject(out, "channels");
+    if (!channels) { cJSON_Delete(out); return ESP_ERR_NO_MEM; }
+    uint32_t total = 0;
+    for (int channel = 1; channel <= BOARD_RESET_CHANNEL_COUNT; ++channel) {
+        board_reset_status_t reset = board_reset_status(channel);
+        cJSON *item = cJSON_CreateObject();
+        if (!item) { cJSON_Delete(out); return ESP_ERR_NO_MEM; }
+        cJSON_AddNumberToObject(item, "channel", channel);
+        cJSON_AddNumberToObject(item, "gpio", board_reset_gpio(channel));
+        cJSON_AddNumberToObject(item, "cooldown_ms", reset.cooldown_ms);
+        cJSON_AddNumberToObject(item, "reset_count", reset.count);
+        cJSON_AddBoolToObject(item, "enabled", reset.enabled);
+        cJSON_AddBoolToObject(item, "active", reset.active);
+        cJSON_AddItemToArray(channels, item);
+        total += reset.count;
+    }
+    cJSON_AddNumberToObject(out, "reset_count", total);
     cJSON_AddBoolToObject(out, "connected", net.connected);
     cJSON_AddBoolToObject(out, "ap_enabled", net.ap_enabled);
     cJSON_AddStringToObject(out, "ssid", settings.ssid);
@@ -126,11 +139,19 @@ static esp_err_t reset_post(httpd_req_t *req)
     cJSON *body = read_json(req);
     if (!body) return ESP_FAIL;
     const cJSON *id = cJSON_GetObjectItemCaseSensitive(body, "request_id");
+    const cJSON *channel_json = cJSON_GetObjectItemCaseSensitive(body, "channel");
+    if (!cJSON_IsNumber(channel_json) || channel_json->valuedouble < 1 ||
+        channel_json->valuedouble > BOARD_RESET_CHANNEL_COUNT ||
+        channel_json->valuedouble != channel_json->valueint) {
+        cJSON_Delete(body);
+        return error_reply(req, "400 Bad Request", "channel must be an integer from 1 to 3");
+    }
+    int channel = channel_json->valueint;
     if (!cJSON_IsString(id) || !id->valuestring[0] || strlen(id->valuestring) > BOARD_RESET_REQUEST_MAX) {
         cJSON_Delete(body);
         return error_reply(req, "400 Bad Request", "request_id must be 1..64 bytes");
     }
-    esp_err_t err = board_reset_press(id->valuestring);
+    esp_err_t err = board_reset_press(channel, id->valuestring);
     if (err != ESP_OK) {
         cJSON_Delete(body);
         return error_reply(req, err == ESP_ERR_INVALID_STATE ? "409 Conflict" : "500 Internal Server Error",
@@ -141,6 +162,8 @@ static esp_err_t reset_post(httpd_req_t *req)
     cJSON_AddBoolToObject(out, "ok", true);
     cJSON_AddStringToObject(out, "request_id", id->valuestring);
     cJSON_AddStringToObject(out, "state", "released");
+    cJSON_AddNumberToObject(out, "channel", channel);
+    cJSON_AddNumberToObject(out, "gpio", board_reset_gpio(channel));
     cJSON_AddNumberToObject(out, "pulse_ms", BOARD_RESET_PULSE_MS);
     cJSON_Delete(body);
     return json_reply(req, "200 OK", out);

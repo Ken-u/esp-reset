@@ -34,7 +34,9 @@ def main(argv=None) -> int:
     parser.add_argument('--token', default=os.environ.get('ESP_RESET_TOKEN', ''))
     commands = parser.add_subparsers(dest='command', required=True)
     commands.add_parser('status')
-    commands.add_parser('reset')
+    reset = commands.add_parser('reset')
+    reset.add_argument('--channel', type=int, choices=(1, 2, 3), required=True,
+                       help='Explicit reset channel (1, 2 or 3)')
     commands.add_parser('reboot', help='Reboot the ESP controller, not the target board')
     wifi = commands.add_parser('wifi')
     wifi.add_argument('ssid')
@@ -48,7 +50,7 @@ def main(argv=None) -> int:
         if args.command == 'status':
             value = request(base, token, '/api/status')
         elif args.command == 'reset':
-            value = request(base, token, '/api/reset', {'request_id': uuid.uuid4().hex})
+            value = request(base, token, '/api/reset', {'channel': args.channel, 'request_id': uuid.uuid4().hex})
         elif args.command == 'reboot':
             value = request(base, token, '/api/reboot', {})
         elif args.command == 'wifi':

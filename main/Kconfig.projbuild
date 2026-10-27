@@ -1,13 +1,25 @@
 menu "ESP Reset"
-config RESET_OUTPUT_GPIO
-    int "External reset switch GPIO (active high)"
+config RESET_OUTPUT_GPIO_1
+    int "Channel 1 GPIO (active high)"
     range 0 48 if IDF_TARGET_ESP32S3
-    range 0 21 if IDF_TARGET_ESP32C3
+    range 0 10 if IDF_TARGET_ESP32C3
     default 4 if IDF_TARGET_ESP32S3
-    default 20 if IDF_TARGET_ESP32C3
+    default 3 if IDF_TARGET_ESP32C3
     help
         Drives an external active-high MOSFET or isolated dry-contact switch.
         Never wire this GPIO directly across an unknown button.
+config RESET_OUTPUT_GPIO_2
+    int "Channel 2 GPIO (active high)"
+    range 0 48 if IDF_TARGET_ESP32S3
+    range 0 10 if IDF_TARGET_ESP32C3
+    default 5 if IDF_TARGET_ESP32S3
+    default 4 if IDF_TARGET_ESP32C3
+config RESET_OUTPUT_GPIO_3
+    int "Channel 3 GPIO (active high)"
+    range 0 48 if IDF_TARGET_ESP32S3
+    range 0 10 if IDF_TARGET_ESP32C3
+    default 6 if IDF_TARGET_ESP32S3
+    default 5 if IDF_TARGET_ESP32C3
 config RESET_RECOVERY_GPIO
     int "Onboard BOOT button GPIO (hold 5 seconds to clear Wi-Fi)"
     default 0 if IDF_TARGET_ESP32S3
